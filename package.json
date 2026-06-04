@@ -1,0 +1,40 @@
+{
+  "name": "tripdesk",
+  "version": "0.1.0",
+  "description": "TripDesk — agent-native flight booking workbench (M1 scaffold)",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:server": "node --env-file=.env.local --watch --import tsx server/index.ts",
+    "predev:all": "pkill -f 'concurrently -n vite,server' 2>/dev/null || true",
+    "dev:all": "concurrently -n vite,server -c blue,green 'pnpm dev' 'pnpm dev:server'",
+    "build": "vite build",
+    "start": "node --import tsx server/index.ts"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.19.14",
+    "better-sqlite3": "^11.8.1",
+    "hono": "^4.12.10",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "rebyte-sandbox": "github:ReByteAI/sandbox-sdk#84b68495e0e958e75835336a59aa9f125dcca0d8"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild"
+    ]
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0"
+  }
+}

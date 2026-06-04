@@ -1,2 +1,18 @@
 .env
+.env.*
 *.key
+
+# 含明文 TravelKit API Key，勿提交
+.mcp.json
+
+# TripDesk app
+node_modules/
+build/
+data/
+*.db
+*.db-*
+
+# Claude Code 本地运行态（保留 .claude/skills 入库）
+.claude/projects/
+.claude/settings.local.json
+
