@@ -13,6 +13,11 @@ function resolveClaudeBin(): string {
   return existsSync(local) ? local : 'claude'
 }
 
+function resolveDbDriver(): 'sqlite' | 'd1' | 'pg' | 'mysql' {
+  const v = process.env.TRIPDESK_DB
+  return v === 'd1' || v === 'pg' || v === 'mysql' ? v : 'sqlite'
+}
+
 export const env = {
   PORT: parseInt(process.env.PORT ?? '4001', 10),
 
@@ -41,6 +46,13 @@ export const env = {
    *  (gitignored); never log it. Empty in local mode. */
   REBYTE_API_KEY: process.env.REBYTE_API_KEY ?? '',
   REBYTE_CONSOLE_URL: process.env.REBYTE_CONSOLE_URL ?? 'https://app.rebyte.ai/share',
+
+  // ── storage ─────────────────────────────────────────────────────────
+  /** Which DB driver server/db.ts builds. sqlite = local zero-setup (default);
+   *  d1 (Cloudflare) / pg (AWS) / mysql (GCP) land at deploy time. See server/store.ts. */
+  DB_DRIVER: resolveDbDriver(),
+  /** Connection string for the d1/pg/mysql drivers (unused by sqlite). */
+  DATABASE_URL: process.env.DATABASE_URL ?? '',
 }
 
 export type Env = typeof env

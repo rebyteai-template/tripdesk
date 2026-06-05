@@ -20,7 +20,7 @@ const SYSTEM_APPEND = [
   '先搜索→实时验价→验价通过后再收集证件；下单/支付/退改等写操作必须经用户明确确认；',
   '绝不向用户暴露 solutionId、orderKey、PNR、票号等内部字段。默认用简体中文回复。',
   env.PAYMENT_MODE === 'sandbox'
-    ? '当前为沙箱模式：可以搜索、验价、下单，但严禁完成任何真实支付/扣款操作。'
+    ? '当前为沙箱/演示模式：可搜索、验价、下单，并可发起支付——发起支付只会返回第三方支付链接，交由用户自行在第三方平台（微信/支付宝/信用卡等）完成；你绝不替用户在第三方平台完成付款，也绝不谎称已支付，把支付链接交给用户后即停，等用户自行决定。'
     : '',
 ].join('')
 
@@ -37,11 +37,11 @@ function buildArgs(projectId: string, sessionId: string, resume: boolean): strin
   // The prompt is fed via stdin (see runTurn), not as a positional arg —
   // `--disallowedTools <tools...>` is variadic and would otherwise swallow a
   // trailing positional prompt.
+  // flight_pay_order stays enabled in every mode: it only returns a third-party
+  // payment LINK (Yeepay/Airwallex) for the user to complete externally — calling
+  // it does not move money. The sandbox framing in SYSTEM_APPEND keeps the agent
+  // from completing or faking a payment; it hands over the link and stops.
   const disallowed = ['AskUserQuestion']
-  if (env.PAYMENT_MODE === 'sandbox') {
-    // Belt-and-suspenders: even if the prompt asks, the real pay tool is off.
-    disallowed.push('mcp__travelkit__flight_pay_order')
-  }
   return [
     '-p',
     '--permission-mode', 'bypassPermissions',
@@ -57,24 +57,42 @@ function buildArgs(projectId: string, sessionId: string, resume: boolean): strin
 }
 
 /** Spawns the turn and returns immediately; frames land in the DB as they
- *  arrive. Status flips on process close. */
-export function runTurn(taskId: string, projectId: string, promptId: string, prompt: string): void {
-  const cwd = ensureProject(projectId)
-  const task = store.getTask(taskId)
-  const resume = !!task?.session_id
-  const sessionId = task?.session_id ?? randomUUID()
-  if (!resume) store.setTaskSession(taskId, sessionId)
+ *  arrive. Status flips on process close. Async only to await the store (the DB is
+ *  now an async, swappable interface); callers still fire-and-forget. */
+export async function runTurn(taskId: string, projectId: string, promptId: string, prompt: string): Promise<void> {
+  let child: ChildProcess
+  try {
+    const cwd = ensureProject(projectId)
+    const task = await store.getTask(taskId)
+    const resume = !!task?.session_id
+    const sessionId = task?.session_id ?? randomUUID()
+    if (!resume) await store.setTaskSession(taskId, sessionId)
 
-  const child = spawn(env.CLAUDE_BIN, buildArgs(projectId, sessionId, resume), {
-    cwd,
-    stdio: ['pipe', 'pipe', 'pipe'],
-    env: process.env,
-  })
-  child.stdin.end(prompt)
-  running.set(promptId, child)
+    child = spawn(env.CLAUDE_BIN, buildArgs(projectId, sessionId, resume), {
+      cwd,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: process.env,
+    })
+    child.stdin!.end(prompt)
+    running.set(promptId, child)
+  } catch (e) {
+    await store.appendFrame(promptId, nextSeq(promptId), { __error: e instanceof Error ? e.message : String(e) })
+    await store.finishPrompt(promptId, 'failed')
+    await store.setTaskStatus(taskId, 'failed')
+    return
+  }
+
+  // Serialize frame writes: nextSeq assigns order synchronously, this chain keeps
+  // an async driver's INSERTs in that order, and the close handler awaits it so
+  // every frame lands before the status flips to terminal.
+  let writeChain: Promise<void> = Promise.resolve()
+  const write = (data: unknown): void => {
+    const seq = nextSeq(promptId)
+    writeChain = writeChain.then(() => store.appendFrame(promptId, seq, data)).catch(() => {})
+  }
 
   let buf = ''
-  child.stdout.on('data', (chunk: Buffer) => {
+  child.stdout!.on('data', (chunk: Buffer) => {
     buf += chunk.toString('utf8')
     let nl: number
     while ((nl = buf.indexOf('\n')) >= 0) {
@@ -83,18 +101,18 @@ export function runTurn(taskId: string, projectId: string, promptId: string, pro
       if (!line) continue
       let data: unknown
       try { data = JSON.parse(line) } catch { data = { __raw: line } }
-      store.appendFrame(promptId, nextSeq(promptId), data)
+      write(data)
     }
   })
 
   let stderr = ''
-  child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8') })
+  child.stderr!.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8') })
 
   child.on('error', (e: NodeJS.ErrnoException) => {
     const msg = e.code === 'ENOENT'
       ? `claude 未找到（${env.CLAUDE_BIN}）。设置 CLAUDE_BIN 指向真实 claude 二进制。`
       : e.message
-    store.appendFrame(promptId, nextSeq(promptId), { __error: msg })
+    write({ __error: msg })
   })
 
   child.on('close', (code, signal) => {
@@ -102,14 +120,17 @@ export function runTurn(taskId: string, projectId: string, promptId: string, pro
     if (buf.trim()) {
       let data: unknown
       try { data = JSON.parse(buf) } catch { data = { __raw: buf } }
-      store.appendFrame(promptId, nextSeq(promptId), data)
+      write(data)
     }
-    if (stderr.trim()) store.appendFrame(promptId, nextSeq(promptId), { __stderr: stderr.trim() })
+    if (stderr.trim()) write({ __stderr: stderr.trim() })
 
     const status = signal === 'SIGTERM' ? 'canceled' : code === 0 ? 'completed' : 'failed'
-    store.finishPrompt(promptId, status)
-    store.setTaskStatus(taskId, status)
-    seqCounters.delete(promptId)
+    void (async () => {
+      await writeChain
+      await store.finishPrompt(promptId, status)
+      await store.setTaskStatus(taskId, status)
+      seqCounters.delete(promptId)
+    })()
   })
 }
 

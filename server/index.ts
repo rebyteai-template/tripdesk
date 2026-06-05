@@ -19,7 +19,7 @@ top.get('/', serveStatic({ root: './build', path: 'index.html' }))
 top.get('*', serveStatic({ root: './build' }))
 
 serve({ fetch: top.fetch, port: env.PORT }, (info) => {
-  console.log(`[tripdesk] api on http://127.0.0.1:${info.port}  (payment: ${env.PAYMENT_MODE})`)
+  console.log(`[tripdesk] api on http://127.0.0.1:${info.port}  (backend: ${env.BACKEND}, payment: ${env.PAYMENT_MODE})`)
   console.log(`[tripdesk] data dir: ${env.DATA_DIR}`)
   console.log(`[tripdesk] claude bin: ${env.CLAUDE_BIN}`)
 })

@@ -35,6 +35,16 @@ export async function seedTravelkit(ac: AgentComputer): Promise<string[]> {
   await writeFile(sbx, `${CODE}/.mcp.json`, mcp)
   written.push('.mcp.json')
 
+  // Pre-trust the project .mcp.json so the sandbox's non-interactive (`--print`)
+  // claude actually LOADS travelkit. cctools wires NO mcpServers into the coding
+  // sub-agent and passes no --mcp-config (confirmed in cctools source), so the
+  // sub-agent relies purely on project .mcp.json discovery — which is gated behind
+  // a trust the headless agent can't grant interactively. Without this the
+  // sub-agent has no flight_search → empty result → the manager fabricates.
+  const settings = JSON.stringify({ enableAllProjectMcpServers: true }, null, 2)
+  await writeFile(sbx, `${CODE}/.claude/settings.json`, settings)
+  written.push('.claude/settings.json')
+
   const skillRoot = join(env.REPO_ROOT, '.claude', 'skills', 'travelkit')
   for (const rel of walk(skillRoot)) {
     await writeFile(sbx, `${CODE}/.claude/skills/travelkit/${rel}`, readFileSync(join(skillRoot, rel), 'utf8'))
