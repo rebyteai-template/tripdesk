@@ -1,5 +1,13 @@
 const BASE = '/api/app'
 
+async function json<T>(path: string, init?: RequestInit): Promise<T> {
+  const r = await fetch(`${BASE}${path}`, init)
+  if (!r.ok) throw new Error(`${init?.method ?? 'GET'} ${path} failed: ${r.status}`)
+  return r.json() as Promise<T>
+}
+const postJson = <T>(path: string, body: unknown): Promise<T> =>
+  json<T>(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+
 export interface PromptContent {
   id: string
   prompt: string
@@ -16,39 +24,18 @@ export interface SessionSummary {
 }
 
 /** The signed-in user (from Cloudflare Access). 401 → not authenticated. */
-export async function getMe(): Promise<{ email: string }> {
-  const r = await fetch(`${BASE}/me`)
-  if (!r.ok) throw new Error(`me failed: ${r.status}`)
-  return r.json()
-}
+export const getMe = (): Promise<{ email: string }> => json('/me')
 
 /** The caller's sessions (newest first). */
 export async function listSessions(): Promise<SessionSummary[]> {
-  const r = await fetch(`${BASE}/tasks`)
-  if (!r.ok) throw new Error(`listSessions failed: ${r.status}`)
-  const d = (await r.json()) as { tasks: SessionSummary[] }
-  return d.tasks
+  return (await json<{ tasks: SessionSummary[] }>('/tasks')).tasks
 }
 
-export async function createTask(prompt: string): Promise<{ taskId: string; promptId: string }> {
-  const r = await fetch(`${BASE}/tasks`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ prompt }),
-  })
-  if (!r.ok) throw new Error(`createTask failed: ${r.status}`)
-  return r.json()
-}
+export const createTask = (prompt: string): Promise<{ taskId: string; promptId: string }> =>
+  postJson('/tasks', { prompt })
 
-export async function followup(taskId: string, prompt: string): Promise<{ promptId: string }> {
-  const r = await fetch(`${BASE}/tasks/${taskId}/prompts`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ prompt }),
-  })
-  if (!r.ok) throw new Error(`followup failed: ${r.status}`)
-  return r.json()
-}
+export const followup = (taskId: string, prompt: string): Promise<{ promptId: string }> =>
+  postJson(`/tasks/${taskId}/prompts`, { prompt })
 
 export async function loadContent(
   taskId: string,

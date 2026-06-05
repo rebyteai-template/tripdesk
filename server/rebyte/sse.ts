@@ -1,6 +1,6 @@
 /** Shared SSE line parser for the rebyte relay `/events` stream.
  *  Yields one {event,data} per SSE message; `data` is JSON-parsed when possible,
- *  else kept as the raw string. Framing lives here so smoke/hello/spike share it.
+ *  else kept as the raw string. Framing lives here so smoke/multiturn/cardprobe share it.
  */
 export interface SSEMessage {
   event: string

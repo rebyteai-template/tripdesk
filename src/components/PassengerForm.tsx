@@ -15,21 +15,16 @@ function Field({ label, required, children }: { label: string; required?: boolea
 
 export function PassengerForm({
   initial,
-  international,
   onSubmit,
   onBack,
   busy,
 }: {
   initial: PassengerDraft[]
-  /** Whether the route looks international — only affects which doc type the UI defaults to. */
-  international: boolean
   onSubmit: (passengers: PassengerDraft[]) => void
   onBack: () => void
   busy: boolean
 }) {
-  const [list, setList] = useState<PassengerDraft[]>(() =>
-    international ? initial.map((p) => (p.docType === 'idcard' ? { ...p, docType: 'passport' } : p)) : initial,
-  )
+  const [list, setList] = useState<PassengerDraft[]>(() => initial)
 
   function update(i: number, patch: Partial<PassengerDraft>) {
     setList((prev) => prev.map((p, idx) => (idx === i ? { ...p, ...patch } : p)))

@@ -1,10 +1,5 @@
 import type { FlightOption } from '../frames.ts'
-
-function fmtDuration(d: string): string {
-  const m = /(\d+)h(\d+)m/.exec(d)
-  if (!m) return d
-  return `${Number(m[1])}小时${Number(m[2]).toString().padStart(2, '0')}分`
-}
+import { cabinLabel, fmtDuration, stopsLabel } from '../booking.ts'
 
 function fmtRoute(o: FlightOption): string {
   const first = o.route[0]
@@ -19,8 +14,7 @@ function fmtTime(o: FlightOption): string {
   const first = o.route[0]
   const last = o.route[o.route.length - 1]
   if (!first || !last) return ''
-  const stops = o.transferNum === 0 ? '直飞' : `中转${o.transferNum}次`
-  return `${first.departureTime}-${last.arrivalTime}｜${stops}约${fmtDuration(o.duration)}`
+  return `${first.departureTime}-${last.arrivalTime}｜${stopsLabel(o.transferNum)}约${fmtDuration(o.duration)}`
 }
 
 export function SearchResultsTable({
@@ -60,7 +54,7 @@ export function SearchResultsTable({
               <td className="mono">{o.flights.join(' / ')}</td>
               <td>{fmtRoute(o)}</td>
               <td>{fmtTime(o)}</td>
-              <td>{o.cabinClass === 'economy' ? '经济舱' : o.cabinClass}{o.cabinCode ? ` / ${o.cabinCode}` : ''}</td>
+              <td>{cabinLabel(o.cabinClass, o.cabinCode)}</td>
               <td className="num">¥{o.priceTotal}{o.priceTotal === cheapest ? ' 🏷️' : ''}</td>
               <td>
                 <button disabled={busy} onClick={() => onBook(o.label)}>预订</button>

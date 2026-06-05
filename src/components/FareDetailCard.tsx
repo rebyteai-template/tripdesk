@@ -1,34 +1,9 @@
 import type { FareVerification, FareJourney } from '../frames.ts'
-
-const CABIN_LABELS: Record<string, string> = {
-  economy: '经济舱',
-  premium_economy: '超级经济舱',
-  business: '商务舱',
-  premium_business: '超级商务舱',
-  first: '头等舱',
-  premium_first: '超级头等舱',
-}
-const PAX_LABELS: Record<string, string> = { adult: '成人', child: '儿童', infant: '婴儿' }
-
-function fmtDuration(d: string): string {
-  const m = /(\d+)h(\d+)m/.exec(d)
-  if (!m) return d
-  return `${Number(m[1])}小时${Number(m[2]).toString().padStart(2, '0')}分`
-}
-function cabin(c: string, code?: string): string {
-  return (CABIN_LABELS[c] ?? c) + (code ? ` / ${code}` : '')
-}
-function pax(t: string): string {
-  return PAX_LABELS[t] ?? t
-}
+import { cabinLabel, currencySymbol, fmtDuration, journeyFacts, lowStockWarning, paxLabel } from '../booking.ts'
 
 function JourneyRow({ j }: { j: FareJourney }) {
-  const first = j.legs[0]
-  const last = j.legs[j.legs.length - 1]
-  const route = first && last ? `${first.departure} → ${last.arrival}` : `${j.origin} → ${j.destination}`
-  const flights = j.legs.map((l) => l.flightNo).filter(Boolean).join(' / ')
-  const stops = j.transferNum === 0 ? '直飞' : `中转${j.transferNum}次`
-  const cab = first ? cabin(first.cabinClass, first.cabinCode) : ''
+  const { route, flights, stops } = journeyFacts(j)
+  const cab = j.legs[0] ? cabinLabel(j.legs[0].cabinClass, j.legs[0].cabinCode) : ''
   return (
     <div className="fare-journey">
       <div className="fare-journey-main">
@@ -53,9 +28,9 @@ export function FareDetailCard({
   onContinue: () => void
   busy: boolean
 }) {
-  const cur = fare.currency === 'CNY' ? '¥' : `${fare.currency} `
+  const cur = currencySymbol(fare)
   const hasDiscount = fare.publishTotal > fare.total
-  const low = fare.minAvailability !== null && fare.minAvailability <= 3
+  const low = lowStockWarning(fare)
   const multiPax = fare.passengers.length > 1 || (fare.passengers[0]?.num ?? 1) > 1
 
   return (
@@ -83,7 +58,7 @@ export function FareDetailCard({
             <tbody>
               {fare.passengers.map((p, i) => (
                 <tr key={i}>
-                  <td>{pax(p.passengerType)} ×{p.num}</td>
+                  <td>{paxLabel(p.passengerType)} ×{p.num}</td>
                   <td className="num">票面 {cur}{p.baseFare}</td>
                   <td className="num">税 {cur}{p.tax}</td>
                   <td className="num">小计 {cur}{p.salePrice * p.num}</td>
@@ -99,7 +74,7 @@ export function FareDetailCard({
           <h3>行李额</h3>
           {fare.baggage.map((b, i) => (
             <div key={i} className="fare-kv muted">
-              {fare.baggage.length > 1 ? <span className="fare-tag">{pax(b.passengerType)}</span> : null}
+              {fare.baggage.length > 1 ? <span className="fare-tag">{paxLabel(b.passengerType)}</span> : null}
               {b.carryOn ? <div>手提：{b.carryOn}</div> : null}
               {b.checked ? <div>托运：{b.checked}</div> : null}
             </div>
@@ -112,7 +87,7 @@ export function FareDetailCard({
           <h3>退改规则</h3>
           {fare.fareRules.map((r, i) => (
             <div key={i} className="fare-kv muted">
-              {fare.fareRules.length > 1 ? <span className="fare-tag">{pax(r.passengerType)}</span> : null}
+              {fare.fareRules.length > 1 ? <span className="fare-tag">{paxLabel(r.passengerType)}</span> : null}
               {r.refundDescription ? <div>退票：{r.refundDescription}</div> : null}
               {r.changeDescription ? <div>改签：{r.changeDescription}</div> : null}
               <div>{r.canVoid ? '支持免费取消（以工具返回为准）' : '不支持免费取消'}</div>
@@ -121,11 +96,7 @@ export function FareDetailCard({
         </section>
       ) : null}
 
-      {low ? (
-        <div className="fare-warn">
-          当前余票不多，仅剩 {fare.minAvailability} 张，请尽快完成预订和支付；未支付前票价和余票可能变化。
-        </div>
-      ) : null}
+      {low ? <div className="fare-warn">{low}</div> : null}
 
       <div className="fare-cta">
         <button disabled={busy} onClick={onContinue}>继续预订，收集乘机人信息</button>

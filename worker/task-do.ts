@@ -388,7 +388,7 @@ export class TaskDO extends DurableObject<Env> {
       // we connect BEFORE the agent has emitted anything, it sends an immediate empty `done`
       // (lastSeq:-1) — a replay race, NOT the turn ending. Only a `done` preceded by real
       // events on THIS connection is terminal; an empty one means "retry next window".
-      // (smoke.ts/spike.ts guard the same way.) Without this the first window connects right
+      // (smoke.ts/multiturn.ts guard the same way.) Without this the first window connects right
       // after POST, takes the empty done as terminal, and finalizes the turn as failed before
       // the agent answers — the UI shows the opening line then stops.
       let rawCount = 0

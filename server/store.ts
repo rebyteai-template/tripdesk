@@ -2,12 +2,11 @@
  * Storage contract. The whole app talks to this async `Store` interface and never
  * to a concrete database — so the driver swaps freely (the template's "switch the
  * DB whenever" goal; mirrors adits). It is ASYNC because the production targets are
- * async: Cloudflare D1 (primary deploy), Postgres (AWS RDS), MySQL (GCP Cloud SQL).
- * The local dev driver (better-sqlite3) is synchronous under the hood but presents
- * the same async surface, so call sites don't change when the DB does.
+ * async: Cloudflare D1 (primary deploy + local dev via `wrangler dev`), Postgres
+ * (AWS RDS), MySQL (GCP Cloud SQL). Add a `store-<driver>.ts` and call sites don't change.
  *
  * Three tables mirror adits' turn model:
- *   tasks   — one booking conversation (claude session id / rebyte relay task id)
+ *   tasks   — one booking conversation (keyed to a rebyte relay task id)
  *   prompts — one agent turn within a task
  *   frames  — one stream-json line of agent output, ordered by seq
  */
@@ -15,7 +14,6 @@ export interface Task {
   id: string
   project_id: string
   status: string
-  session_id: string | null
   relay_task_id: string | null
   user_email: string | null
   created_at: string
@@ -51,7 +49,6 @@ export interface Store {
   createTask(id: string, projectId: string, userEmail: string): Promise<void>
   getTask(id: string): Promise<Task | undefined>
   listTasksByUser(userEmail: string): Promise<TaskSummary[]>
-  setTaskSession(id: string, sessionId: string): Promise<void>
   setTaskStatus(id: string, status: string): Promise<void>
   setTaskRelayId(id: string, relayTaskId: string): Promise<void>
 
@@ -67,7 +64,3 @@ export interface Store {
   appendFrame(promptId: string, seq: number, data: unknown): Promise<void>
   framesSince(promptId: string, fromSeq: number): Promise<Frame[]>
 }
-
-/** Which driver server/db.ts instantiates. The SQLite family (sqlite/d1) shares
- *  SQL verbatim; pg/mysql need a dialect driver. */
-export type DbDriver = 'sqlite' | 'd1' | 'pg' | 'mysql'

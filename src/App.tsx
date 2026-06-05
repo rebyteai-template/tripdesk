@@ -145,7 +145,6 @@ export function App() {
               view={view}
               mode={mode}
               orderDraft={orderDraft}
-              international={false}
               onBook={(label) => send(`预订选项 ${label}，先帮我验价`)}
               onContinue={continueToPassengers}
               onSubmitPassengers={(passengers) => { setOrderDraft(passengers); setMode('confirm') }}

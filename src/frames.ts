@@ -89,7 +89,6 @@ export interface FareVerification {
   baggage: BaggageInfo[]
   fareRules: FareRuleInfo[]
   minAvailability: number | null
-  requiredPassengerInfos: string[]
 }
 
 // ── chat + combined view ───────────────────────────────────────────────
@@ -330,10 +329,6 @@ function parseVerify(json: Record<string, unknown>): FareVerification | null {
     })
   }
 
-  const requiredPassengerInfos = Array.isArray(data.requiredPassengerInfos)
-    ? data.requiredPassengerInfos.filter((x): x is string => typeof x === 'string')
-    : []
-
   if (!journeys.length && !passengers.length) return null
-  return { currency, total, baseFare, tax, publishTotal, journeys, passengers, baggage, fareRules, minAvailability, requiredPassengerInfos }
+  return { currency, total, baseFare, tax, publishTotal, journeys, passengers, baggage, fareRules, minAvailability }
 }

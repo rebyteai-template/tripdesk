@@ -1,5 +1,5 @@
 import type { DerivedView, FareVerification, FareJourney } from '../frames.ts'
-import { PAX_LABELS, passengerName, docLabel, amountLine, type PassengerDraft } from '../booking.ts'
+import { PAX_LABELS, passengerName, docLabel, amountLine, journeyFacts, lowStockWarning, type PassengerDraft } from '../booking.ts'
 import { SearchResultsTable } from './SearchResultsTable.tsx'
 import { FareDetailCard } from './FareDetailCard.tsx'
 import { PassengerForm } from './PassengerForm.tsx'
@@ -8,11 +8,7 @@ import { ConfirmGate, type ConfirmRow } from './ConfirmGate.tsx'
 export type BenchMode = 'auto' | 'passengers' | 'confirm'
 
 function journeyText(j: FareJourney): string {
-  const first = j.legs[0]
-  const last = j.legs[j.legs.length - 1]
-  const route = first && last ? `${first.departure} → ${last.arrival}` : `${j.origin} → ${j.destination}`
-  const flights = j.legs.map((l) => l.flightNo).filter(Boolean).join(' / ')
-  const stops = j.transferNum === 0 ? '直飞' : `中转${j.transferNum}次`
+  const { route, flights, stops } = journeyFacts(j)
   return `${route} · ${flights} · ${j.departureDate} ${j.departureTime}→${j.arrivalTime} · ${stops}`
 }
 
@@ -27,17 +23,13 @@ function orderGate(fare: FareVerification, passengers: PassengerDraft[]): { rows
   })
   const first = passengers[0]
   if (first) rows.push({ label: '联系人', value: `默认使用 ${passengerName(first)} ${first.phone}` })
-  const warning = fare.minAvailability !== null && fare.minAvailability <= 3
-    ? `当前余票不多，仅剩 ${fare.minAvailability} 张，请尽快完成预订和支付；未支付前票价和余票可能变化。`
-    : null
-  return { rows, warning }
+  return { rows, warning: lowStockWarning(fare) }
 }
 
 export function Bench({
   view,
   mode,
   orderDraft,
-  international,
   onBook,
   onContinue,
   onSubmitPassengers,
@@ -49,7 +41,6 @@ export function Bench({
   view: DerivedView
   mode: BenchMode
   orderDraft: PassengerDraft[]
-  international: boolean
   onBook: (label: string) => void
   onContinue: () => void
   onSubmitPassengers: (passengers: PassengerDraft[]) => void
@@ -64,7 +55,7 @@ export function Bench({
   let body: React.ReactNode = null
   if (mode === 'passengers' && fare) {
     body = (
-      <PassengerForm initial={orderDraft} international={international}
+      <PassengerForm initial={orderDraft}
         onSubmit={onSubmitPassengers} onBack={onBackFromForm} busy={busy} />
     )
   } else if (mode === 'confirm' && fare) {

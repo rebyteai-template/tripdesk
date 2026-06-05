@@ -46,12 +46,6 @@ export function createD1Store(db: D1Database): Store {
         .bind(userEmail, acId, sandboxId)
         .run()
     },
-    async setTaskSession(id, sessionId) {
-      await db
-        .prepare(`UPDATE tasks SET session_id = ? WHERE id = ? AND session_id IS NULL`)
-        .bind(sessionId, id)
-        .run()
-    },
     async setTaskStatus(id, status) {
       await db.prepare(`UPDATE tasks SET status = ? WHERE id = ?`).bind(status, id).run()
     },

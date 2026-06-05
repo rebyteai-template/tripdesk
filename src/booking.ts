@@ -4,7 +4,7 @@
  * natural-language prompt we hand the agent — the agent owns all the internal
  * order/passenger IDs (DESIGN §4.3, §5).
  */
-import type { FareVerification } from './frames.ts'
+import type { FareVerification, FareJourney } from './frames.ts'
 
 export type DocType = 'idcard' | 'passport' | 'mtp' | 'ttp'
 export type PaxType = 'adult' | 'child' | 'infant'
@@ -82,11 +82,49 @@ export function passengerName(p: PassengerDraft): string {
   return usesPassport(p.docType) ? `${p.surnameEn}/${p.givenNamesEn}`.trim() : p.nameCn
 }
 
-const CUR = (fare: FareVerification) => (fare.currency === 'CNY' ? '¥' : `${fare.currency} `)
+// ── flight display formatters (shared by the search / fare / confirm cards) ──
+export const CABIN_LABELS: Record<string, string> = {
+  economy: '经济舱',
+  premium_economy: '超级经济舱',
+  business: '商务舱',
+  premium_business: '超级商务舱',
+  first: '头等舱',
+  premium_first: '超级头等舱',
+}
+/** Fall back to the raw code when a passenger/cabin type isn't in the label map. */
+export const paxLabel = (t: string): string => PAX_LABELS[t as PaxType] ?? t
+export const cabinLabel = (cabinClass: string, code?: string): string =>
+  (CABIN_LABELS[cabinClass] ?? cabinClass) + (code ? ` / ${code}` : '')
+
+/** "2h35m" → "2小时35分"; passes anything that doesn't match straight through. */
+export function fmtDuration(d: string): string {
+  const m = /(\d+)h(\d+)m/.exec(d)
+  if (!m) return d
+  return `${Number(m[1])}小时${Number(m[2]).toString().padStart(2, '0')}分`
+}
+export const stopsLabel = (transferNum: number): string => (transferNum === 0 ? '直飞' : `中转${transferNum}次`)
+
+/** Route / flight numbers / stops derived from a verified journey's legs. */
+export function journeyFacts(j: FareJourney): { route: string; flights: string; stops: string } {
+  const first = j.legs[0]
+  const last = j.legs[j.legs.length - 1]
+  const route = first && last ? `${first.departure} → ${last.arrival}` : `${j.origin} → ${j.destination}`
+  const flights = j.legs.map((l) => l.flightNo).filter(Boolean).join(' / ')
+  return { route, flights, stops: stopsLabel(j.transferNum) }
+}
+
+export const currencySymbol = (fare: FareVerification): string => (fare.currency === 'CNY' ? '¥' : `${fare.currency} `)
+
+/** Skill output-rule warning when seats are scarce; null when availability is fine/unknown. */
+export function lowStockWarning(fare: FareVerification): string | null {
+  return fare.minAvailability !== null && fare.minAvailability <= 3
+    ? `当前余票不多，仅剩 ${fare.minAvailability} 张，请尽快完成预订和支付；未支付前票价和余票可能变化。`
+    : null
+}
 
 /** Amount line per output-rules: total = fare + tax; mark splits 未返回 if absent. */
 export function amountLine(fare: FareVerification): string {
-  const c = CUR(fare)
+  const c = currencySymbol(fare)
   if (fare.baseFare > 0 && fare.tax > 0) {
     return `金额：${c}${fare.total}（票面价 ${c}${fare.baseFare} + 税价 ${c}${fare.tax}）`
   }

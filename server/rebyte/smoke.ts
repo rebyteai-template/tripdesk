@@ -5,7 +5,7 @@
  *    L2 往返   POST /v1/tasks → /events → reply+done         — agent-loop 回复路通?
  *  Bonus: probes /content?include=events to record whether the event history is
  *  now retrievable post-run (decides SSE-vs-poll for the task-runner).
- *  L3 (full delegated VM + travelkit) lives in spike.ts → `pnpm test:rebyte:full`.
+ *  L3 (full delegated VM + travelkit round-trip) lives in multiturn.ts → `pnpm test:rebyte:multiturn`.
  *  Run: pnpm test:rebyte
  */
 import { env } from '../env.ts'
