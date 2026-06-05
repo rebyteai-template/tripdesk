@@ -39,13 +39,18 @@ interface RelayEvent {
   payload?: Record<string, unknown>
 }
 
-/** The in-flight turn, persisted in DO storage so alarm() resumes idempotently. */
+/** The in-flight turn, persisted in DO storage so alarm() resumes idempotently. The
+ *  session's relay task id lives separately (DO storage key 'relayTaskId') so it
+ *  survives across turns — follow-ups continue that SAME relay task. */
 interface TurnState {
   taskId: string
   promptId: string
   prompt: string
   userEmail: string
   relayTaskId?: string
+  /** Did this turn already submit its prompt to the relay (create or /prompts)?
+   *  Guards a retried alarm from double-submitting after a window/eviction. */
+  submitted: boolean
   lastRelaySeq: number
   sawText: boolean
   deadline: number
@@ -164,6 +169,7 @@ export class TaskDO extends DurableObject<Env> {
       promptId,
       prompt,
       userEmail,
+      submitted: false,
       lastRelaySeq: 0,
       sawText: false,
       deadline: Date.now() + TURN_TIMEOUT_MS,
@@ -187,20 +193,43 @@ export class TaskDO extends DurableObject<Env> {
     const config = this.rebyteConfig()
 
     try {
-      if (!t.relayTaskId) {
-        const ac = await this.agentComputerFor(t.userEmail)
-        const relayPrompt = `${REBYTE_INSTRUCTION}\n\n用户需求：\n${t.prompt}`
-        const task = await rebyteJSON<{ id: string }>('/tasks', {
-          method: 'POST',
-          body: JSON.stringify({ prompt: relayPrompt, workspaceId: ac.id, executor: 'claude', model: MODEL }),
-          config,
-        })
-        t.relayTaskId = task.id
-        await this.store.setTaskRelayId(t.taskId, t.relayTaskId)
+      if (!t.submitted) {
+        // One relay task per SESSION (not per turn): the first turn creates it; every
+        // follow-up appends its prompt to that same task so the hosted agent keeps the
+        // conversation context (prior search/verify). Without this each turn span a fresh
+        // relay task with zero memory — "验价第①个" couldn't continue the earlier search.
+        let relayTaskId = await this.ctx.storage.get<string>('relayTaskId')
+        // Recover from a reset DO: the session's relay task is also mirrored on the D1 row.
+        if (!relayTaskId) relayTaskId = (await this.store.getTask(t.taskId))?.relay_task_id ?? undefined
+
+        if (!relayTaskId) {
+          // First turn: provision the per-user sandbox and create the relay task.
+          const ac = await this.agentComputerFor(t.userEmail)
+          const relayPrompt = `${REBYTE_INSTRUCTION}\n\n用户需求：\n${t.prompt}`
+          const task = await rebyteJSON<{ id: string }>('/tasks', {
+            method: 'POST',
+            body: JSON.stringify({ prompt: relayPrompt, workspaceId: ac.id, executor: 'claude', model: MODEL }),
+            config,
+          })
+          relayTaskId = task.id
+          await this.ctx.storage.put('relayTaskId', relayTaskId)
+          await this.store.setTaskRelayId(t.taskId, relayTaskId)
+        } else {
+          // Follow-up turn: append this prompt to the existing relay task. The red-line
+          // instruction was already delivered on turn 1 and persists in the agent's context,
+          // so we send the user's prompt alone. /events then streams this latest prompt.
+          await rebyteJSON(`/tasks/${relayTaskId}/prompts`, {
+            method: 'POST',
+            body: JSON.stringify({ prompt: t.prompt }),
+            config,
+          })
+        }
+        t.relayTaskId = relayTaskId
+        t.submitted = true
         await this.ctx.storage.put('turn', t)
         // Surface this turn's rebyte run so the UI can link to app.rebyte.ai/run/<id>.
         this.frameSeq = await this.maxFrameSeq(t.promptId)
-        await this.emit(t.promptId, { __rebyte_run: t.relayTaskId })
+        await this.emit(t.promptId, { __rebyte_run: relayTaskId })
       }
 
       const done = await this.streamWindow(t, config)
@@ -254,8 +283,19 @@ export class TaskDO extends DurableObject<Env> {
       }
       if (!res.ok || !res.body) return { terminal: false }
 
+      // The relay replays from seq 0 on each connect, then sends `done` at the end. But if
+      // we connect BEFORE the agent has emitted anything, it sends an immediate empty `done`
+      // (lastSeq:-1) — a replay race, NOT the turn ending. Only a `done` preceded by real
+      // events on THIS connection is terminal; an empty one means "retry next window".
+      // (smoke.ts/spike.ts guard the same way.) Without this the first window connects right
+      // after POST, takes the empty done as terminal, and finalizes the turn as failed before
+      // the agent answers — the UI shows the opening line then stops.
+      let rawCount = 0
       for await (const msg of parseSSE(res.body)) {
         if (msg.event === 'done') {
+          // Empty replay-race done: back off briefly so the retry loop doesn't hammer the relay
+          // while the agent spins up, then let alarm() re-arm and reconnect.
+          if (rawCount === 0) { await new Promise((r) => setTimeout(r, 800)); return { terminal: false } }
           const d = isObj(msg.data) ? msg.data : {}
           return {
             terminal: true,
@@ -264,6 +304,7 @@ export class TaskDO extends DurableObject<Env> {
           }
         }
         if (!isObj(msg.data)) continue
+        rawCount++
         const ev = msg.data as RelayEvent
         const seq = typeof ev.seq === 'number' ? ev.seq : t.lastRelaySeq + 1
         if (seq <= t.lastRelaySeq) continue
