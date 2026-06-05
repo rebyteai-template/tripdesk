@@ -1,37 +1,11 @@
 /**
- * Storage entry point + driver selector. Call sites do `import { store } from
- * './db.ts'` and never see which database backs it — so the DB swaps by env alone
- * (the template's "switch whenever" goal; mirrors adits' DATABASE_URL pattern).
+ * Storage entry point. The app talks to the async `Store` interface (server/store.ts)
+ * and never to a concrete database. On Cloudflare the only driver is D1 — and since
+ * `wrangler dev` gives a local D1, it's also the dev store (no separate sqlite driver).
  *
- *   TRIPDESK_DB = sqlite (default, local zero-setup)
- *               | d1     (Cloudflare D1 — primary deploy target)
- *               | pg     (Postgres / AWS RDS)
- *               | mysql  (MySQL / GCP Cloud SQL)
- *
- * The Store interface (server/store.ts) is async so an edge/serverless driver
- * drops in unchanged. SQLite SQL uses `?` placeholders that D1 shares verbatim;
- * pg/mysql need a dialect driver. Only `sqlite` ships today; the rest land at
- * deploy time as sibling server/store-<driver>.ts files.
+ * The D1 binding is per-request (env.DB), so there is NO module-global singleton here
+ * the way the old better-sqlite3 build had: callers build the store from their binding
+ * via createD1Store(env.DB). (pg/mysql could return later as sibling driver files.)
  */
-import { env } from './env.ts'
-import type { Store } from './store.ts'
-import { createSqliteStore } from './store-sqlite.ts'
-
-function createStore(): Store {
-  switch (env.DB_DRIVER) {
-    case 'sqlite':
-      return createSqliteStore()
-    case 'd1':
-    case 'pg':
-    case 'mysql':
-      throw new Error(
-        `DB 驱动 '${env.DB_DRIVER}' 待实现（部署阶段）：照 server/store-sqlite.ts 的 Store 接口加 ` +
-          `server/store-${env.DB_DRIVER}.ts，并在此 case 实例化。SQL 已是可移植形状（D1 与 sqlite 同；pg/mysql 换方言）。`,
-      )
-    default:
-      throw new Error(`未知 TRIPDESK_DB='${String(env.DB_DRIVER)}'，可选 sqlite|d1|pg|mysql。`)
-  }
-}
-
-export const store: Store = createStore()
-export type { Store, Task, Prompt, Frame, DbDriver } from './store.ts'
+export { createD1Store } from './store-d1.ts'
+export type { Store, Task, Prompt, Frame } from './store.ts'

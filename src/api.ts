@@ -7,6 +7,29 @@ export interface PromptContent {
   frames: { seq: number; data: unknown }[]
 }
 
+/** One conversation in the per-user session list. */
+export interface SessionSummary {
+  id: string
+  status: string
+  created_at: string
+  title: string
+}
+
+/** The signed-in user (from Cloudflare Access). 401 → not authenticated. */
+export async function getMe(): Promise<{ email: string }> {
+  const r = await fetch(`${BASE}/me`)
+  if (!r.ok) throw new Error(`me failed: ${r.status}`)
+  return r.json()
+}
+
+/** The caller's sessions (newest first). */
+export async function listSessions(): Promise<SessionSummary[]> {
+  const r = await fetch(`${BASE}/tasks`)
+  if (!r.ok) throw new Error(`listSessions failed: ${r.status}`)
+  const d = (await r.json()) as { tasks: SessionSummary[] }
+  return d.tasks
+}
+
 export async function createTask(prompt: string): Promise<{ taskId: string; promptId: string }> {
   const r = await fetch(`${BASE}/tasks`, {
     method: 'POST',

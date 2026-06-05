@@ -1,36 +1,39 @@
 {
   "name": "tripdesk",
   "version": "0.1.0",
-  "description": "TripDesk — agent-native flight booking workbench (M1 scaffold)",
+  "description": "TripDesk — agent-native flight booking workbench (Cloudflare Workers + D1 + Durable Objects)",
   "private": true,
   "type": "module",
+  "packageManager": "pnpm@10.27.0",
   "scripts": {
-    "dev": "vite",
-    "dev:server": "node --env-file=.env.local --watch --import tsx server/index.ts",
-    "predev:all": "pkill -f 'concurrently -n vite,server' 2>/dev/null || true",
-    "dev:all": "concurrently -n vite,server -c blue,green 'pnpm dev' 'pnpm dev:server'",
+    "gen:seed": "node --import tsx scripts/gen-seed-assets.ts",
+    "predev": "pnpm gen:seed",
+    "dev": "concurrently -n vite,worker -c blue,green \"vite\" \"wrangler dev\"",
     "build": "vite build",
-    "start": "node --import tsx server/index.ts",
+    "predeploy": "pnpm gen:seed",
+    "deploy": "wrangler deploy",
+    "pretypecheck": "pnpm gen:seed",
     "typecheck": "tsc --noEmit",
-    "test:rebyte": "node --env-file=.env.local --import tsx server/rebyte/smoke.ts",
-    "test:rebyte:full": "node --env-file=.env.local --import tsx server/rebyte/smoke.ts && node --env-file=.env.local --import tsx server/rebyte/spike.ts"
+    "db:migrate": "wrangler d1 migrations apply tripdesk --remote",
+    "db:migrate:local": "wrangler d1 migrations apply tripdesk --local",
+    "bootstrap:rebyte": "node --env-file=.env.local --import tsx scripts/bootstrap-rebyte.ts",
+    "test:rebyte": "node --env-file=.env.local --import tsx server/rebyte/smoke.ts"
   },
   "dependencies": {
-    "@hono/node-server": "^1.19.14",
-    "better-sqlite3": "^11.8.1",
     "hono": "^4.12.10",
+    "jose": "^6.2.3",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "rebyte-sandbox": "github:ReByteAI/sandbox-sdk#84b68495e0e958e75835336a59aa9f125dcca0d8"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
-      "better-sqlite3",
-      "esbuild"
+      "esbuild",
+      "workerd"
     ]
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.12",
+    "@cloudflare/workers-types": "^4.20250603.0",
     "@types/node": "^22.10.0",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
@@ -38,6 +41,7 @@
     "concurrently": "^9.1.0",
     "tsx": "^4.21.0",
     "typescript": "^5.7.0",
-    "vite": "^6.0.0"
+    "vite": "^6.0.0",
+    "wrangler": "^4.98.0"
   }
 }

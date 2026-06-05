@@ -14,11 +14,17 @@ export function ChatPanel({ chat, busy }: { chat: ChatBubble[]; busy: boolean })
           <p>试试：<em>查明天北京飞上海的机票，1 人，直飞</em></p>
         </div>
       ) : (
-        chat.map((b) => (
-          <div key={b.key} className={`bubble ${b.role}`}>
-            {b.text}
-          </div>
-        ))
+        chat.map((b) =>
+          b.runUrl ? (
+            <a key={b.key} className="run-link" href={b.runUrl} target="_blank" rel="noreferrer">
+              ↗ 在 rebyte 查看本次运行
+            </a>
+          ) : (
+            <div key={b.key} className={`bubble ${b.role}`}>
+              {b.text}
+            </div>
+          ),
+        )
       )}
       {busy ? <div className="bubble assistant typing">正在处理…</div> : null}
       <div ref={endRef} />

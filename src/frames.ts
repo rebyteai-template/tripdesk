@@ -97,6 +97,8 @@ export interface ChatBubble {
   key: string
   role: 'user' | 'assistant'
   text: string
+  /** When set, the bubble renders as a link to this turn's rebyte run. */
+  runUrl?: string
 }
 
 export type Stage = 'idle' | 'search' | 'verify' | 'order' | 'payment'
@@ -151,6 +153,12 @@ export function derive(prompts: PromptContent[]): DerivedView {
       const data = f.data
       if (!isObj(data)) continue
 
+      // rebyte run link for this turn (emitted by the DO when the relay task starts)
+      if (typeof data.__rebyte_run === 'string') {
+        chat.push({ key: `r-${p.id}-${f.seq}`, role: 'assistant', text: '', runUrl: `https://app.rebyte.ai/run/${data.__rebyte_run}` })
+        continue
+      }
+
       // assistant turn: collect text bubbles + remember tool_use ids → names
       if (data.type === 'assistant' && isObj(data.message)) {
         const content = (data.message as Record<string, unknown>).content
@@ -201,7 +209,7 @@ export function derive(prompts: PromptContent[]): DerivedView {
   const deduped: ChatBubble[] = []
   for (const b of chat) {
     const prev = deduped[deduped.length - 1]
-    if (prev && prev.role === b.role && prev.text === b.text) continue
+    if (prev && prev.role === b.role && prev.text === b.text && prev.runUrl === b.runUrl) continue
     deduped.push(b)
   }
   return { chat: deduped, stage, search, fare, notice }

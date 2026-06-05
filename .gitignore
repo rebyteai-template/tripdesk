@@ -2,6 +2,11 @@
 .env.*
 *.key
 
+# Cloudflare API token + account id — never commit
+cloudflare.env
+*.dev.vars
+.wrangler/
+
 # 含明文 TravelKit API Key，勿提交
 .mcp.json
 
@@ -16,3 +21,12 @@ data/
 .claude/projects/
 .claude/settings.local.json
 
+
+# wrangler local secrets
+.dev.vars
+
+# auth allowlist
+whitelist.json
+
+# generated (embeds travelkit token)
+worker/seed-assets.generated.ts

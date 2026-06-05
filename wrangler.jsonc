@@ -1,0 +1,53 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "tripdesk",
+  "main": "worker/index.ts",
+  "compatibility_date": "2025-06-01",
+  // The rebyte client + shared server code lean on Node-ish globals; keep compat on.
+  "compatibility_flags": ["nodejs_compat"],
+
+  // Custom domain tripdesk.impo.ai is attached out-of-band via the account-level Workers
+  // custom-domain API (this token lacks zone-level Workers Routes perms, so we do NOT put
+  // it in `routes` — wrangler would try the zone routes API and 403). The binding persists
+  // independently of deploys. Re-attach: PUT /accounts/<id>/workers/domains if ever dropped.
+  //
+  // Disable the unprotected *.workers.dev shell: the only ingress is the Access-gated
+  // custom domain, so there's no public, login-less entry.
+  "workers_dev": false,
+
+  // Cloudflare Access (OTP) config the Worker verifies the JWT against. Not secret —
+  // the AUD is public in the Access login redirect, the team domain is public.
+  "vars": {
+    "CF_ACCESS_TEAM_DOMAIN": "rebyte-admin.cloudflareaccess.com",
+    "CF_ACCESS_AUD": "4dfa774d1b2c8aeef189513c9129b12fbe9b099e1266177542eaf74d6003b98b"
+  },
+
+  // Static SPA (vite build). SPA fallback serves index.html for client-side routes;
+  // the Worker handles /api/app/* before falling through to assets.
+  "assets": {
+    "directory": "./build",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application"
+  },
+
+  // tasks/prompts/frames + kv. database_id is filled in after `wrangler d1 create tripdesk`.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "tripdesk",
+      "database_id": "0faa3f05-8e1a-4f1f-96e3-aaf276d702f5",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  // One Durable Object per task: owns the long-lived rebyte /events → frames loop.
+  "durable_objects": {
+    "bindings": [{ "name": "TASK_DO", "class_name": "TaskDO" }]
+  },
+  // v1 was the abandoned container DO (TripDeskContainer); v2 renames that already-
+  // registered class to the real task runner so CF doesn't reject the dropped class.
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["TripDeskContainer"] },
+    { "tag": "v2", "renamed_classes": [{ "from": "TripDeskContainer", "to": "TaskDO" }] }
+  ]
+}

@@ -1,27 +1,74 @@
 import { useEffect, useMemo, useState } from 'react'
-import { createTask, followup, loadContent, streamPrompt, type PromptContent } from './api.ts'
+import {
+  createTask,
+  followup,
+  loadContent,
+  streamPrompt,
+  getMe,
+  listSessions,
+  type PromptContent,
+  type SessionSummary,
+} from './api.ts'
 import { derive } from './frames.ts'
 import { passengersFromFare, buildOrderPrompt, type PassengerDraft } from './booking.ts'
 import { ChatPanel } from './components/ChatPanel.tsx'
 import { Composer } from './components/Composer.tsx'
 import { Bench, type BenchMode } from './components/Bench.tsx'
+import { SessionList } from './components/SessionList.tsx'
 
-const TASK_KEY = 'tripdesk.taskId'
+/** Current session lives in the URL (?t=…) so refresh/deep-link restores it. Identity
+ *  comes from Cloudflare Access, so a session belongs to a user, not a browser tab. */
+function urlTaskId(): string | null {
+  return new URLSearchParams(location.search).get('t')
+}
+function setUrlTaskId(id: string | null): void {
+  const u = new URL(location.href)
+  if (id) u.searchParams.set('t', id)
+  else u.searchParams.delete('t')
+  history.replaceState(null, '', u)
+}
 
 export function App() {
-  const [taskId, setTaskId] = useState<string | null>(() => localStorage.getItem(TASK_KEY))
+  const [email, setEmail] = useState('')
+  const [sessions, setSessions] = useState<SessionSummary[]>([])
+  const [taskId, setTaskId] = useState<string | null>(() => urlTaskId())
   const [prompts, setPrompts] = useState<PromptContent[]>([])
   const [busy, setBusy] = useState(false)
   const [mode, setMode] = useState<BenchMode>('auto')
   const [orderDraft, setOrderDraft] = useState<PassengerDraft[]>([])
+  const [navOpen, setNavOpen] = useState(false) // mobile session drawer
+  const [pane, setPane] = useState<'chat' | 'bench'>('chat') // mobile: which pane is visible
 
-  // Rehydrate a prior conversation on load.
+  // Bootstrap: who am I, my sessions, and restore the one named in the URL.
   useEffect(() => {
-    if (!taskId) return
-    loadContent(taskId)
-      .then((c) => { if (c) setPrompts(c.prompts) })
-      .catch(() => { /* stale id; ignore */ })
-  }, [taskId])
+    getMe().then((m) => setEmail(m.email)).catch(() => {})
+    void refreshSessions()
+    const t = urlTaskId()
+    if (t) void openSession(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  async function refreshSessions() {
+    try { setSessions(await listSessions()) } catch { /* unauthenticated; leave empty */ }
+  }
+
+  async function openSession(id: string) {
+    setTaskId(id)
+    setUrlTaskId(id)
+    setMode('auto')
+    setOrderDraft([])
+    setNavOpen(false) // close the mobile drawer after picking a session
+    try { const c = await loadContent(id); setPrompts(c?.prompts ?? []) }
+    catch { setPrompts([]) }
+  }
+
+  function newSession() {
+    setTaskId(null)
+    setUrlTaskId(null)
+    setPrompts([])
+    setOrderDraft([])
+    setMode('auto')
+  }
 
   const view = useMemo(() => derive(prompts), [prompts])
 
@@ -40,8 +87,9 @@ export function App() {
       if (!taskId) {
         const r = await createTask(text)
         setTaskId(r.taskId)
-        localStorage.setItem(TASK_KEY, r.taskId)
+        setUrlTaskId(r.taskId)
         pid = r.promptId
+        void refreshSessions()
       } else {
         const r = await followup(taskId, text)
         pid = r.promptId
@@ -50,7 +98,7 @@ export function App() {
       streamPrompt(
         pid,
         (seq, data) => appendFrame(pid, seq, data),
-        () => setBusy(false),
+        () => { setBusy(false); void refreshSessions() },
       )
     } catch (e) {
       console.error(e)
@@ -66,41 +114,48 @@ export function App() {
     setMode('passengers')
   }
 
-  function reset() {
-    localStorage.removeItem(TASK_KEY)
-    setTaskId(null)
-    setPrompts([])
-    setOrderDraft([])
-    setMode('auto')
-  }
-
   return (
     <div className="app">
       <header className="topbar">
+        <button className="hamburger" onClick={() => setNavOpen(true)} aria-label="会话列表">☰</button>
         <span className="brand">TripDesk</span>
         <span className="tag">沙箱模式</span>
-        <button className="ghost" onClick={reset}>新会话</button>
+        <div className="pane-toggle">
+          <button className={pane === 'chat' ? 'active' : ''} onClick={() => setPane('chat')}>对话</button>
+          <button className={pane === 'bench' ? 'active' : ''} onClick={() => setPane('bench')}>看板</button>
+        </div>
+        <button className="ghost" onClick={newSession}>新会话</button>
       </header>
-      <div className="split">
-        <section className="left">
-          <ChatPanel chat={view.chat} busy={busy} />
-          <Composer onSend={send} busy={busy} />
-        </section>
-        <section className="right">
-          <Bench
-            view={view}
-            mode={mode}
-            orderDraft={orderDraft}
-            international={false}
-            onBook={(label) => send(`预订选项 ${label}，先帮我验价`)}
-            onContinue={continueToPassengers}
-            onSubmitPassengers={(passengers) => { setOrderDraft(passengers); setMode('confirm') }}
-            onBackFromForm={() => setMode('auto')}
-            onConfirmOrder={() => { if (view.fare) send(buildOrderPrompt(orderDraft, view.fare)) }}
-            onCancelConfirm={() => setMode('passengers')}
-            busy={busy}
-          />
-        </section>
+      <div className="workspace">
+        <SessionList
+          email={email}
+          sessions={sessions}
+          currentId={taskId}
+          onSelect={openSession}
+          open={navOpen}
+          onClose={() => setNavOpen(false)}
+        />
+        <div className={`split pane-${pane}`}>
+          <section className="left">
+            <ChatPanel chat={view.chat} busy={busy} />
+            <Composer onSend={send} busy={busy} />
+          </section>
+          <section className="right">
+            <Bench
+              view={view}
+              mode={mode}
+              orderDraft={orderDraft}
+              international={false}
+              onBook={(label) => send(`预订选项 ${label}，先帮我验价`)}
+              onContinue={continueToPassengers}
+              onSubmitPassengers={(passengers) => { setOrderDraft(passengers); setMode('confirm') }}
+              onBackFromForm={() => setMode('auto')}
+              onConfirmOrder={() => { if (view.fare) send(buildOrderPrompt(orderDraft, view.fare)) }}
+              onCancelConfirm={() => setMode('passengers')}
+              busy={busy}
+            />
+          </section>
+        </div>
       </div>
     </div>
   )

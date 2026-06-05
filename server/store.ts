@@ -17,7 +17,22 @@ export interface Task {
   status: string
   session_id: string | null
   relay_task_id: string | null
+  user_email: string | null
   created_at: string
+}
+
+/** Lightweight conversation row for the per-user session list (sidebar). */
+export interface TaskSummary {
+  id: string
+  status: string
+  created_at: string
+  title: string
+}
+
+/** A user's pre-seeded sandbox (agent_computers row). */
+export interface AgentComputerRow {
+  id: string
+  sandboxId: string | null
 }
 export interface Prompt {
   id: string
@@ -33,11 +48,16 @@ export interface Frame {
 }
 
 export interface Store {
-  createTask(id: string, projectId: string): Promise<void>
+  createTask(id: string, projectId: string, userEmail: string): Promise<void>
   getTask(id: string): Promise<Task | undefined>
+  listTasksByUser(userEmail: string): Promise<TaskSummary[]>
   setTaskSession(id: string, sessionId: string): Promise<void>
   setTaskStatus(id: string, status: string): Promise<void>
   setTaskRelayId(id: string, relayTaskId: string): Promise<void>
+
+  getAgentComputer(userEmail: string): Promise<AgentComputerRow | undefined>
+  /** Idempotent (INSERT OR IGNORE): first writer per email wins, losers no-op. */
+  saveAgentComputer(userEmail: string, acId: string, sandboxId: string | null): Promise<void>
 
   createPrompt(id: string, taskId: string, prompt: string): Promise<void>
   getPrompt(id: string): Promise<Prompt | undefined>
