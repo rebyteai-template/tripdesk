@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-AI 机票预订工作台（TripDesk）：左聊天、右 bench 渲染订票领域状态。agent 走完整在线机票流程（搜索→验价→下单→支付→售后），数据来自 **TravelKit MCP**（`https://mcp.travelkit.ai/mcp`）。产品与卡片设计见 **DESIGN.md**。
+AI 机票预订工作台（TripDesk）：左聊天、右 bench 渲染订票领域状态。agent 走完整在线机票流程（搜索→验价→下单→支付→售后），数据来自 **TravelKit MCP**（`https://mcp.travelkit.ai/mcp`）。产品定位/用户/原则见 **PRODUCT.md**；视觉设计系统（色板/字体/组件，kami house style）见 **DESIGN.md**。
 
 ## 这是什么：Rebyte 能力的模板 demo（先读这条）
 

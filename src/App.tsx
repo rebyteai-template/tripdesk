@@ -38,6 +38,9 @@ export function App() {
   const [orderDraft, setOrderDraft] = useState<PassengerDraft[]>([])
   const [navOpen, setNavOpen] = useState(false) // mobile session drawer
   const [pane, setPane] = useState<'chat' | 'bench'>('chat') // mobile: which pane is visible
+  const [theme, setTheme] = useState<'light' | 'dark'>(
+    () => (typeof localStorage !== 'undefined' && localStorage.getItem('tripdesk-theme') === 'dark' ? 'dark' : 'light'),
+  )
 
   // Bootstrap: who am I, my sessions, and restore the one named in the URL.
   useEffect(() => {
@@ -47,6 +50,12 @@ export function App() {
     if (t) void openSession(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Theme: reflect light/dark on <html> and remember the choice.
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', theme === 'dark')
+    try { localStorage.setItem('tripdesk-theme', theme) } catch { /* ignore */ }
+  }, [theme])
 
   async function refreshSessions() {
     try { setSessions(await listSessions()) } catch { /* unauthenticated; leave empty */ }
@@ -124,6 +133,18 @@ export function App() {
           <button className={pane === 'chat' ? 'active' : ''} onClick={() => setPane('chat')}>对话</button>
           <button className={pane === 'bench' ? 'active' : ''} onClick={() => setPane('bench')}>看板</button>
         </div>
+        <button
+          className="ghost theme-toggle"
+          onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
+          aria-label={theme === 'dark' ? '切换到浅色主题' : '切换到深色主题'}
+          title={theme === 'dark' ? '浅色' : '深色'}
+        >
+          {theme === 'dark' ? (
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></svg>
+          ) : (
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" /></svg>
+          )}
+        </button>
         <button className="ghost" onClick={newSession}>新会话</button>
       </header>
       <div className="workspace">

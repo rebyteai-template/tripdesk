@@ -1,178 +1,209 @@
-# 设计文档：订票 Agent 工作台（暂名 TripDesk）
-
-> 目标：做一个类似 [adits](https://adits.ai) 的产品，但围绕**机票预订全流程**，有自己的 UI。
-> 本文档是动手前的方案，先评审再实现。
->
-> 本阶段范围（已拍板）：**新仓库、借用 adits 架构、本地单机优先、不碰托管多用户/支付合规**。
->
-> ⚠️ **实现现状（2026-06，与下文方案有出入，以此为准）**：① 卡片组件实际在 `src/components/`（非 §6 的 `src/app/domain-views/`）；② 后端主线已从"本地 spawn claude"**转到 rebyte 托管 relay**（§3 的本地架构图只对 `local` 模式适用；frames/卡片层不变）。运行/架构/现状以 **CLAUDE.md** 为准；本文留作产品与卡片设计参考。
-
+---
+name: TripDesk
+description: AI 机票预订工作台 — 克制可信的暖纸张工作台，kami house style
+colors:
+  parchment: "#f5f4ed"
+  ivory: "#faf9f5"
+  sand: "#e8e6dc"
+  ink: "#141413"
+  charcoal: "#4d4c48"
+  olive: "#5e5d59"
+  stone: "#87867f"
+  silver: "#b0aea5"
+  border: "#e8e5da"
+  border-strong: "#e0ddd2"
+  brand: "#1b365d"
+  brand-deep: "#11233f"
+  brand-pale: "#e8eef6"
+  brand-border: "#cfdce9"
+  success: "#5a7a3a"
+  success-pale: "#eaefe2"
+  warning: "#7a5a25"
+  warning-pale: "#f5ead4"
+  error: "#b53333"
+  error-pale: "#f5e4e4"
+typography:
+  display:
+    fontFamily: "Newsreader, Georgia, 'Source Han Serif SC', serif"
+    fontSize: "22px"
+    fontWeight: 500
+    lineHeight: 1.2
+  body:
+    fontFamily: "Lato, -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif"
+    fontSize: "14px"
+    fontWeight: 400
+    lineHeight: 1.55
+  label:
+    fontFamily: "Lato, -apple-system, 'PingFang SC', sans-serif"
+    fontSize: "12px"
+    fontWeight: 600
+    lineHeight: 1.35
+  mono:
+    fontFamily: "'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, monospace"
+    fontSize: "13px"
+    fontWeight: 400
+    lineHeight: 1.55
+rounded:
+  sm: "8px"
+  md: "10px"
+  lg: "12px"
+  pill: "999px"
+spacing:
+  xs: "6px"
+  sm: "8px"
+  md: "10px"
+  lg: "14px"
+  xl: "18px"
+components:
+  button-primary:
+    backgroundColor: "{colors.brand}"
+    textColor: "{colors.ivory}"
+    rounded: "{rounded.md}"
+    padding: "10px 18px"
+  button-primary-hover:
+    backgroundColor: "{colors.brand-deep}"
+  button-ghost:
+    backgroundColor: "transparent"
+    textColor: "{colors.olive}"
+    rounded: "{rounded.md}"
+    padding: "9px 18px"
+  card:
+    backgroundColor: "{colors.ivory}"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.lg}"
+    padding: "18px"
+  input:
+    backgroundColor: "{colors.sand}"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.sm}"
+    padding: "8px 10px"
+  chip:
+    backgroundColor: "{colors.brand-pale}"
+    textColor: "{colors.brand}"
+    rounded: "{rounded.pill}"
+    padding: "1px 7px"
 ---
 
-## 1. 背景：从 adits 学到什么
+# Design System: TripDesk
 
-adits 不是"设计工具"，本质是一个 **「把编码 agent 丢进项目文件夹、用 UI 帮你拼下一句 prompt」的编排器**。核心三件套：
+## 1. Overview
 
-1. **agent 即 runtime**：后端 `spawn('claude', ['-p', '--output-format', 'stream-json', ...])`，把 Claude Code CLI 当子进程跑在 `projects/<id>/` 目录里（`adits/server/backend/local/task-runner.ts:78`、`commandForExecutor` 在 `:62`）。可按 turn 换 Gemini/Codex。
-2. **turn 模型**：`tasks`(会话) → `prompts`(每一轮) → `frames`(每行 stream-json 输出)。前端用 **SSE**（`GET /prompts/:id/stream`）实时读 frames（`adits/server/routes.ts:229`）。
-3. **bench + chip composer**：右侧画布渲染 agent 产出的**文件**；用户在文件上的手势（拉滑块、圈选、评论）不直接生效，而是**攒成 chip 拼进下一句 prompt**，整批发给 agent。"chat 装对话，bench 装文件"。
+**Creative North Star: "排版讲究的行程单"（The Itinerary, Well-Typeset）**
 
-### 关键洞察（决定本设计）
+TripDesk 应当像旅行社 OP 案头那份排版讲究的行程单 / 对账单：暖纸张底色，墨黑文字，信息分层清楚，唯一的靛蓝色只在该强调处出现。它服务一天处理几百单的专业操作员——所以**安静、可信、久看不累**比任何视觉花活都重要。整套系统继承自 kami house style（与姊妹项目 cctools / kami.tw93.fun 同源）：暖灰中性、单一靛蓝强调、细描边、近乎无影。
 
-**我们不需要替换 agent，也不需要自己写 MCP 客户端。**
+它**明确拒绝**三种长相：改版前的深色霓虹科技风（深蓝黑 + 电光蓝）；玩具 / 卡通感（大圆角、强阴影、糖果色）；以及携程 / Expedia / 飞猪式的 OTA 花哨拥挤风（红黄促销、弹窗、角标、信息过载）。
 
-- travelkit 本身就是一个 HTTP MCP server（`.mcp.json` → `https://mcp.travelkit.ai/mcp`）。
-- Claude Code CLI 原生消费 `.mcp.json` + `.claude/skills/`。
-- 所以 adits 已经在做的"把 claude CLI 丢进带配置的文件夹"**正好就是订票 agent 的运行方式**——本仓库里的对话（搜索→验价→收集乘客信息）走的就是这套。
+**Key Characteristics:**
+- 暖纸张画布（parchment `#f5f4ed`），不是纯白，也不是深色
+- 单一靛蓝强调色（`#1b365d`），覆盖任意一屏 ≤ 5%
+- 暖灰文字阶梯（ink → charcoal → olive → stone → silver），无冷灰
+- 细描边 + 近乎无影；层次靠底色分层，不靠投影
+- 为"比价"而生的信息密度：表格可密、术语可留
+- 字体克制：Lato 扛全部 UI，Newsreader 衬线只在欢迎 / 空态点一下，等宽只给 ID / 票号 / 金额
 
-> **结论：复用 adits 的 agent 编排内核（spawn + stream-json + turn + SSE + chip），真正重做的是 bench——从"渲染文件"换成"渲染订票领域状态"，外加订票独有的支付/PII/确认闸。**
+## 2. Colors
 
----
+暖纸张中性色打底，单一靛蓝强调，状态色走暖调——像编辑批注，不像仪表盘信号灯。
 
-## 2. 复用 vs 重做
+### Primary
+- **靛蓝 Brand Ink-Blue** (`#1b365d`)：主操作、当前选中、链接、焦点环。**唯一**的彩色强调。hover / 按下加深到 **`#11233f`**（brand-deep）。淡底变体 **`#e8eef6`**（brand-pale）用于选中行、标签、金额块等浅蓝底。
 
-| adits 部件 | TripDesk | 改动量 |
-|---|---|---|
-| spawn claude `-p` + stream-json | 完全照搬 | ✅ ~0 |
-| tasks/prompts/frames + SSE 流 | 照搬（turn 就是 turn） | ✅ ~0 |
-| session resume（同会话续连） | 照搬，且**更重要**（验价 orderKey 有时效） | ✅ ~0 |
-| chip composer（手势→下一句 prompt） | 核心复用，换 chip 种类 | 🟡 改 |
-| system.md（设计师人设） | 换成 travelkit skill（仓库已有） | 🟡 换内容 |
-| FileStore + file-types 渲染文件 | **重做**：渲染搜索结果/订单/支付/售后 | 🔴 主要工作 |
-| design-systems / building-skills | **删掉**（设计领域专用，与订票无关） | 🔴 剥离 |
-| 无支付 / 无 PII | **新增**：真钱、真证件、幂等、确认闸 | 🔴 全新 |
+### Neutral
+- **羊皮纸 Parchment** (`#f5f4ed`)：页面画布。
+- **象牙 Ivory** (`#faf9f5`)：卡片、面板、弹层、代码块等抬起表面。
+- **沙 Sand** (`#e8e6dc`)：输入框底、表头底、行内代码底等交互基底。
+- **墨 Ink** (`#141413`)：主文字、标题。
+- **炭 Charcoal** (`#4d4c48`)：次级 / 密集正文。
+- **橄榄 Olive** (`#5e5d59`)：说明、弱化文字（`--muted`；选它而非更浅的 stone，是为了正文对比度 ≥ 4.5:1）。
+- **石 Stone** (`#87867f`)：元信息、标签。
+- **银 Silver** (`#b0aea5`)：最浅一档、禁用。
+- **描边 Border** (`#e8e5da`) / **重描边** (`#e0ddd2`)：分隔线、卡片 / 输入边框。
 
----
+### 状态 Functional
+- **成功 Success** (`#5a7a3a` 暖橄榄绿) / 淡底 `#eaefe2`：验价通过、价格、确认按钮。
+- **警告 Warning** (`#7a5a25` 暖焦糖) / 淡底 `#f5ead4`：价格过期提醒、确认闸边框。
+- **错误 Error** (`#b53333` 暖红) / 淡底 `#f5e4e4`：验价失败、必填标记、报错横幅。
 
-## 3. 架构
+### Named Rules
+**The One Accent Rule.** 全站只有一个彩色强调——靛蓝；任意一屏覆盖 ≤ 5%。想加第二个彩色（紫、青、橙）时，停下来重想。状态色是批注，不是第二强调。
 
-```
-┌─────────────────────────────────────────────┐
-│  前端 (React + Vite)                          │
-│  ┌──────────────┐   ┌────────────────────┐   │
-│  │ Chat (左)     │   │ Bench (右)          │   │
-│  │ - 对话历史    │   │ - 搜索结果表        │   │
-│  │ - Composer    │   │ - 验价详情卡        │   │
-│  │   + chips     │   │ - 乘客信息表单      │   │
-│  └──────────────┘   │ - 订单/支付状态     │   │
-│         │           │ - 售后(退/改/行程单) │   │
-│         │           └────────────────────┘   │
-│         │ 手势→chip→prompt   ▲ 解析 frames    │
-└─────────┼────────────────────┼───────────────┘
-          │ POST /tasks/prompts │ SSE frames
-┌─────────▼────────────────────┴───────────────┐
-│  后端 (Hono + tsx)                            │
-│  - routes: tasks/prompts/stream/cancel        │
-│  - task-runner: spawn claude -p (local)       │
-│  - SQLite/Postgres: tasks/prompts/frames      │
-└─────────┬─────────────────────────────────────┘
-          │ spawn, cwd = projects/<id>/
-┌─────────▼─────────────────────────────────────┐
-│  claude CLI 子进程                             │
-│  cwd 里有: .mcp.json(travelkit) +              │
-│            .claude/skills/travelkit/           │
-│  → 调用 flight_search / verify / create / pay  │
-└─────────┬─────────────────────────────────────┘
-          │ HTTP MCP
-          ▼  https://mcp.travelkit.ai/mcp
-```
+## 3. Typography
 
-### 3.1 项目目录布局（每个会话一个文件夹）
+**Display Font:** Newsreader（衬线，fallback Georgia / Source Han Serif SC）
+**Body Font:** Lato（fallback -apple-system / PingFang SC / Microsoft YaHei）
+**Label / Mono Font:** SF Mono 系统等宽栈
 
-```
-~/.tripdesk/projects/<id>/
-  .mcp.json                 # travelkit MCP（key 从环境注入，不落盘进 git）
-  .claude/skills/travelkit/ # 复用本仓库的 skill（软链/拷贝）
-  state/                    # agent 可选落盘的领域状态快照（见 §4 方案讨论）
-```
+**Character:** 一把 Lato 扛下全部 UI（标题、按钮、标签、正文、数据），层级靠字重和字号，不靠换字体。Newsreader 衬线只在"欢迎 / 空态"这种编辑性时刻点一下，给冷静的工具加一点人味。等宽只服务 ID、票号、金额、时间这类需要对齐的数据。中文一律走系统中文回退（PingFang SC / Microsoft YaHei / 系统宋体）。
 
-### 3.2 后端骨架（借 adits，砍掉文件领域）
+### Hierarchy
+- **Display** (Newsreader 500, 22px, 1.2)：聊天欢迎语等空态标题。**仅此一处**用衬线。
+- **Title** (Lato 600, 17px)：卡片标题 `.card-head h2`、结果区标题 `.results-head h2`。
+- **Body** (Lato 400, 14px / 1.55)：默认正文、聊天气泡、表格单元格。
+- **Label** (Lato 600, 11–12px)：字段标签、标签 chip、表头、会话元信息。
+- **Mono** (SF Mono, 13px)：可见 ID、票号、金额、时间戳。
 
-- `task-runner.ts`：`spawn('claude', ['-p','--permission-mode','bypassPermissions','--output-format','stream-json','--verbose','--include-partial-messages', resume?'--resume':'--session-id', sid, prompt])`，cwd 指向项目目录。**几乎逐行照搬 adits 的 claude 分支。**
-- DB：`tasks / prompts / frames` 三张表照搬。本地用 SQLite 即可（adits 的 `db.ts` 已有方言抽象）。
-- 路由：`POST /projects/:id/tasks`、`POST /tasks/:id/prompts`、`GET /prompts/:id/stream`(SSE)、`POST /tasks/:id/cancel`。
+### Named Rules
+**The One Family Rule.** UI 用一把 Lato。层级 = 字重 + 字号 + 颜色，绝不靠换字体制造层级。衬线是欢迎 / 空态的专属点缀，不进任何按钮、标签、数据。
 
----
+## 4. Elevation
 
-## 4. Bench：从"文件"到"订票领域状态"（本设计的核心）
+近乎扁平。深度靠**底色分层**（parchment 画布 → ivory 抬起面 → sand 交互基底）和 1px 暖描边，而**不是投影**。唯一的真实投影留给移动端的侧边抽屉（它确实浮在内容之上）。
 
-### 4.1 数据来源：解析 frames 里的 tool_result（推荐）
+### Shadow Vocabulary
+- **抽屉投影** (`box-shadow: 2px 0 18px rgba(0,0,0,.45)`)：仅移动端 `.sidebar` 滑出抽屉。
+- **遮罩 scrim** (`background: rgba(0,0,0,.5)`)：移动端抽屉背后的半透明遮罩。
 
-stream-json 流里本来就有每次 MCP 工具调用的 `tool_use` 和 `tool_result`。前端/后端识别是哪个 travelkit 工具，把结构化 JSON 渲染成对应卡片。**UI 永远是工具结果的镜像，agent 无需额外写文件。**
+### Named Rules
+**The Flat-By-Default Rule.** 卡片、按钮、表格在静止时一律无影，靠底色和描边分层。投影只在"真的浮起来"（抽屉、未来的弹层）时出现。装饰性投影、带色发光一律禁止。
 
-> 备选方案 B：让 agent 把视图写成 `state/results.json` 等落盘，bench 像 adits 渲染文件。改动更小但多一跳、且与 skill"不暴露内部字段"易冲突。**采用方案 A。**
+## 5. Components
 
-### 4.2 领域状态机（bench 按当前阶段切换视图）
+### Buttons
+- **Shape:** 10px 圆角（`rounded.md`）；绝不做 999px 胶囊文字按钮。
+- **Primary:** 靛蓝底 (`#1b365d`) + 象牙字，padding 10px 18px，字重 600。用于发送、验价、下单、确认等主操作。
+- **Hover / Focus:** 系统预留 **brand-deep `#11233f`** 作 hover / 按下加深色（当前主按钮多为扁平态，补交互态时统一用它——见 Do's）；焦点环 2px 靛蓝、offset 2px，无发光。
+- **Ghost（次级）:** 透明底 + olive 字 + 1px 描边；hover 文字转墨色。用于取消、关闭等次操作。
+- **Confirm（确认闸）:** 成功色 `#5a7a3a` 底 + 象牙字。专用于 ConfirmGate 里"确认下单 / 支付"那一下。
 
-```
-  搜索 ──→ 选项已选/验价 ──→ 收集乘客 ──→ 待支付订单 ──→ 已出票
-   │                                                      │
-   └─(改条件重搜)                                  售后：退票/改签/发票/行程单
-```
+### Chips / Tags
+- **Style:** 淡靛蓝底 (`#e8eef6`) + 靛蓝字，999px 圆角，padding 1px 7px。用于运价标签、顶栏 demo 标记。
+- **State:** 选中态（会话行、面板切换）用同一淡靛蓝底标识。
 
-| 阶段 | 触发工具 | bench 渲染 |
-|---|---|---|
-| 搜索 | `flight_search` | 6 列结果表（选项/航班/行程/时间/舱位/价格），按 skill 的展示规则 |
-| 验价 | `flight_verify_solution` | 验价详情卡：最终价(票面+税)、行李额、退改规则、低余票提醒 |
-| 收集乘客 | （无工具，skill 引导） | 乘客信息表单（国内证件 / 国际护照两套字段） |
-| 下单 | `flight_create_order` | 订单卡 + **二次确认闸** |
-| 支付 | `flight_pay_order` | 支付方式选择 + 状态 |
-| 售后 | `flight_refund_* / change_* / download_itinerary / invoice` | 对应操作面板 |
+### Cards / Containers
+- **Corner:** 12px（`rounded.lg`）；领域卡 `.card` max-width 720px。
+- **Background:** 象牙 (`#faf9f5`)，区别于 parchment 画布。
+- **Shadow:** 无（见 Elevation：扁平 + 描边）。
+- **Border:** 1px 暖描边 (`#e8e5da`)。
+- **Internal Padding:** 18px（移动端 14px）。
 
-### 4.3 chip composer：手势如何回传
+### Inputs / Fields
+- **Style:** 沙底 (`#e8e6dc`) + 墨字 + 1px 描边，8px 圆角，`color-scheme: light`。
+- **Focus:** 边框转靛蓝（无发光）。
+- **Required / Error:** 必填用错误色 `#b53333` 的标记；报错横幅走 error 淡底 + 描边 + 文字三件套。
 
-复用 adits 的 chip 机制，把 UI 手势变成下一句 prompt：
+### Navigation / Lists
+- **会话侧栏:** ivory 底；会话行 hover 转 sand，选中转淡靛蓝；标题 13px，元信息 11px stone。
+- **移动端:** 侧栏变滑出抽屉（带遮罩），主区按顶栏 toggle 一次显示一栏（聊天 / bench）。
 
-- 用户点结果表"选项 1 预订" → composer 拼出 prompt「预订选项 1」→ 发给 agent → agent 自己拿内部映射去验价/下单。
-- **内部 ID（`solutionId`/`orderKey`/`PNR`/票号）全留在 agent 侧，永不进 UI、不进 URL、不进 chip。** 这与 skill 的红线一致，也与 adits"内部 ID 不暴露"一致。
-- 表单提交、支付方式选择、确认退票等，同样转成 prompt（写操作必须经 §5 确认闸）。
+### Signature: 搜索结果表（比价）
+OP 的核心比价界面。整行表格 ivory 底 + 1px 描边，表头 sand 底 + stone 标签字；最便宜行用 success 淡底 (`#eaefe2`) 轻染高亮；价格列等宽对齐。**密度优先**：一屏要能比多个方案。
 
----
+## 6. Do's and Don'ts
 
-## 5. 订票独有的硬问题（adits 没有）
+### Do:
+- **Do** 用暖纸张画布 (`#f5f4ed`) + 象牙抬起面 (`#faf9f5`)；文字走墨 → 炭 → 橄榄 → 石的暖灰阶梯。
+- **Do** 把靛蓝当唯一强调，任意一屏 ≤ 5%，只给主操作 / 选中 / 状态；hover 加深到 `#11233f`。
+- **Do** 正文对比度 ≥ 4.5:1；弱化文字用 olive，别用更浅的灰"显高级"。
+- **Do** 写操作（下单 / 支付 / 退改）前走 ConfirmGate；接口没返回的数据如实标"未返回"。
+- **Do** 把 ID / 票号 / 金额 / 时间用等宽字对齐；搜索结果保持可比的高密度。
+- **Do** 用底色分层 + 1px 描边表达层次；静止状态一律无影。
 
-| 问题 | 方案（本地单机阶段） |
-|---|---|
-| **写操作确认闸** | 下单/支付/退改前，bench 弹**不可跳过的二次确认**；确认动作生成带摘要的 prompt（金额=票面+税、航班、乘客）。对齐 skill"每次写操作显式确认"。 |
-| **真 PII（证件/手机/邮箱）** | 本地阶段：只存在项目目录、不进 git（`.gitignore` 已忽略 `.env`/`*.key`，需补充忽略 `state/`、乘客信息）。**不做明文日志**。上线前再上加密存储+最小化采集。 |
-| **幂等 / 防重复扣款** | 下单/支付带幂等键（agent 侧已有 idempotency 概念）；UI 上写操作按钮提交后立即禁用，靠 SSE 回来的真实状态解禁，不靠乐观更新。 |
-| **会话时效（orderKey）** | 验价→下单必须同一 claude session 内完成；复用 adits session resume。若 turn 间隔过久导致 orderKey 失效，agent 重新验价（skill 已规定）。 |
-| **状态对账** | frame 是"对真实世界的副作用"，不是纯产出。订单状态以 MCP 返回为准，UI 不臆测；必要时 `flight_order_detail` 刷新。 |
-
----
-
-## 6. 前端文件类型 → 领域卡片组件
-
-照搬 adits `src/app/file-types/` 的注册表思路（一个组件 = 一种渲染），但注册的不是文件类型而是 travelkit 工具结果类型：
-
-```
-src/app/domain-views/
-  index.ts            # 注册表：tool name → 渲染组件
-  search-results.tsx  # flight_search
-  fare-detail.tsx     # flight_verify_solution
-  passenger-form.tsx  # 收集乘客（含确认闸前置）
-  order-card.tsx      # flight_create_order / order_detail
-  payment.tsx         # flight_pay_order
-  aftersale/          # refund / change / itinerary / invoice
-```
-
-新增一种 travelkit 流程 = 加一个组件 + 注册一行，和 adits"加文件类型"一样。
-
----
-
-## 7. 分阶段路线图
-
-- **M1 — 最小链路（验证可行性）**：聊天框 + 后端 spawn claude + SSE；bench 只做"搜索结果表"一种卡片；chip 只支持"选项 N 预订"。目标：跑通『前端读 stream-json 渲染卡片 + chip 回传 prompt』。
-- **M2 — 完整下单到支付**：补验价卡、乘客表单、订单卡、支付面板、二次确认闸、幂等。目标：本地能从搜索一路走到模拟/真实支付。
-- **M3 — 售后**：退票/改签/发票/行程单面板。
-- **M4（后续，超出本阶段）**：托管多用户、鉴权、支付合规、PII 加密存储——参考 adits 的 rebyte/Clerk/Stripe 路径。
-
----
-
-## 8. 待定 / 风险
-
-- **stream-json 里 tool_result 的稳定性**：travelkit 返回结构若变，卡片会碎；M1 先验证解析链路。
-- **skill 不暴露 ID vs UI 需要驱动**：已用 chip 模型化解（ID 留 agent 侧），需在 M1 实测确认 agent 能稳定从"选项 N"反查映射。
-- **支付**：本地阶段是否接真实支付待定；建议 M2 先用 travelkit 的真实下单但**支付环节人工确认/沙箱**，避免误扣款。
-- **技术栈**：默认照搬 adits（React 19 + Vite + Hono + SQLite）。如要换栈需在动手前定。
-```
+### Don't:
+- **Don't** 回到**深色霓虹科技风**（深蓝黑底 + 电光蓝 `#4f8cff` / 霓虹绿 `#2ecc71`）——这是改版前的样子，已废弃。
+- **Don't** 做**玩具 / 卡通感**：超大圆角、带色发光 / 强投影、糖果色、表情堆砌。
+- **Don't** 做 **OTA 花哨拥挤风**（携程 / Expedia / 飞猪）：红黄促销色块、弹窗、满屏角标、信息过载。
+- **Don't** 引入第二个彩色强调（紫 / 青 / 橙），也别用冷灰（slate / zinc / neutral）。
+- **Don't** 用渐变文字、装饰性玻璃拟态、侧边色条（border-left > 1px 当强调）、每段一个小写 eyebrow 标签、hero 大数字模板。
+- **Don't** 把衬线 / 等宽字用进按钮和普通 UI 标签；层级靠字重字号，不靠换字体。
+- **Don't** 用胶囊文字按钮（999px），也别用直角（0）。

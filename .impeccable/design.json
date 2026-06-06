@@ -1,0 +1,143 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-06-06T00:00:00Z",
+  "title": "Design System: TripDesk",
+  "extensions": {
+    "colorMeta": {
+      "brand": {
+        "role": "primary",
+        "displayName": "靛蓝 Brand Ink-Blue",
+        "canonical": "#1b365d",
+        "tonalRamp": ["#0a1426", "#11233f", "#1b365d", "#2d4a72", "#46638c", "#6a86aa", "#9bb1cb", "#cdd9e9"]
+      },
+      "parchment": {
+        "role": "neutral",
+        "displayName": "羊皮纸 Parchment",
+        "canonical": "#f5f4ed",
+        "tonalRamp": ["#1c1b18", "#33312b", "#4d4c48", "#6f6e69", "#87867f", "#b0aea5", "#d6d3c9", "#f5f4ed"]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "墨 Ink",
+        "canonical": "#141413",
+        "tonalRamp": ["#141413", "#33312b", "#4d4c48", "#5e5d59", "#87867f", "#b0aea5", "#e0ddd2", "#faf9f5"]
+      },
+      "success": {
+        "role": "tertiary",
+        "displayName": "成功 暖橄榄绿",
+        "canonical": "#5a7a3a",
+        "tonalRamp": ["#21300f", "#33491c", "#46622a", "#5a7a3a", "#7a9657", "#9bb37e", "#c2d2af", "#eaefe2"]
+      },
+      "warning": {
+        "role": "tertiary",
+        "displayName": "警告 暖焦糖",
+        "canonical": "#7a5a25",
+        "tonalRamp": ["#2e2009", "#46330f", "#5e451a", "#7a5a25", "#9c7a3f", "#c2a06a", "#dcc59a", "#f5ead4"]
+      },
+      "error": {
+        "role": "tertiary",
+        "displayName": "错误 暖红",
+        "canonical": "#b53333",
+        "tonalRamp": ["#3d0f0f", "#5e1a1a", "#8a2727", "#b53333", "#cc5a5a", "#dd8585", "#ecb3b3", "#f5e4e4"]
+      }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display (Newsreader)", "purpose": "聊天欢迎语等空态标题；唯一的衬线时刻。" },
+      "body": { "displayName": "Body (Lato)", "purpose": "全部 UI 正文、按钮、表格、标签的工作字体。" },
+      "mono": { "displayName": "Mono (SF Mono)", "purpose": "ID、票号、金额、时间戳等需要对齐的数据。" }
+    },
+    "shadows": [
+      { "name": "drawer", "value": "2px 0 18px rgba(0,0,0,0.45)", "purpose": "仅移动端侧边抽屉滑出时——唯一真实浮起的面。" }
+    ],
+    "motion": [
+      { "name": "drawer-slide", "value": "transform 0.2s ease", "purpose": "移动端抽屉滑入/滑出。" },
+      { "name": "reduced-motion", "value": "@media (prefers-reduced-motion: reduce)", "purpose": "动效只用于状态反馈；尊重系统减弱动效偏好。" }
+    ],
+    "breakpoints": [
+      { "name": "mobile", "value": "820px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "主操作：发送、验价、下单。靛蓝底象牙字，hover 加深。",
+      "html": "<button class=\"ds-btn-primary\">验价</button>",
+      "css": ".ds-btn-primary { font-family: 'Lato', -apple-system, sans-serif; font-weight: 600; font-size: 14px; background: #1b365d; color: #faf9f5; border: none; border-radius: 10px; padding: 10px 18px; cursor: pointer; transition: background 0.15s ease; } .ds-btn-primary:hover { background: #11233f; } .ds-btn-primary:focus-visible { outline: 2px solid #1b365d; outline-offset: 2px; } .ds-btn-primary:disabled { opacity: 0.5; cursor: default; }"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "次操作：取消、关闭。透明底 olive 字细描边。",
+      "html": "<button class=\"ds-btn-ghost\">取消</button>",
+      "css": ".ds-btn-ghost { font-family: 'Lato', -apple-system, sans-serif; font-weight: 600; font-size: 14px; background: transparent; color: #5e5d59; border: 1px solid #e8e5da; border-radius: 10px; padding: 9px 18px; cursor: pointer; transition: color 0.15s ease; } .ds-btn-ghost:hover { color: #141413; } .ds-btn-ghost:focus-visible { outline: 2px solid #1b365d; outline-offset: 2px; }"
+    },
+    {
+      "name": "Domain Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "领域卡（验价/订单等）。象牙底、细描边、扁平无影。",
+      "html": "<div class=\"ds-card\"><h3 class=\"ds-card-h\">验价详情</h3><p>票面 + 税 ¥1,280</p></div>",
+      "css": ".ds-card { background: #faf9f5; color: #141413; border: 1px solid #e8e5da; border-radius: 12px; padding: 18px; max-width: 720px; font-family: 'Lato', -apple-system, sans-serif; font-size: 14px; line-height: 1.55; } .ds-card-h { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: #5e5d59; }"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "乘客信息字段。沙底、墨字、聚焦描边转靛蓝。",
+      "html": "<input class=\"ds-input\" placeholder=\"乘客姓名\" />",
+      "css": ".ds-input { background: #e8e6dc; color: #141413; border: 1px solid #e8e5da; border-radius: 8px; padding: 8px 10px; font-family: 'Lato', -apple-system, sans-serif; font-size: 14px; color-scheme: light; } .ds-input:focus { outline: none; border-color: #1b365d; } .ds-input::placeholder { color: #87867f; }"
+    },
+    {
+      "name": "Tag / Chip",
+      "kind": "chip",
+      "refersTo": "chip",
+      "description": "运价标签、demo 标记。淡靛蓝底靛蓝字，pill。",
+      "html": "<span class=\"ds-chip\">含托运行李</span>",
+      "css": ".ds-chip { display: inline-block; font-family: 'Lato', -apple-system, sans-serif; font-size: 11px; color: #1b365d; background: #e8eef6; padding: 1px 7px; border-radius: 999px; }"
+    },
+    {
+      "name": "Fare Row (cheapest highlight)",
+      "kind": "custom",
+      "refersTo": "card",
+      "description": "搜索结果表行；最便宜行用 success 淡底轻染，价格列等宽对齐。",
+      "html": "<table class=\"ds-fare\"><thead><tr><th>航班</th><th>时间</th><th class=\"ds-num\">价格</th></tr></thead><tbody><tr class=\"ds-cheapest\"><td>CA1234</td><td>08:05–10:40</td><td class=\"ds-num\">¥1,280</td></tr><tr><td>MU5678</td><td>09:20–12:05</td><td class=\"ds-num\">¥1,460</td></tr></tbody></table>",
+      "css": ".ds-fare { width: 100%; border-collapse: collapse; background: #faf9f5; border: 1px solid #e8e5da; border-radius: 10px; overflow: hidden; font-family: 'Lato', -apple-system, sans-serif; font-size: 13px; } .ds-fare th, .ds-fare td { text-align: left; padding: 9px 12px; border-bottom: 1px solid #e8e5da; } .ds-fare th { color: #87867f; font-weight: 600; background: #e8e6dc; } .ds-fare tr:last-child td { border-bottom: none; } .ds-num { text-align: right; white-space: nowrap; font-family: 'SF Mono', Monaco, Consolas, monospace; } .ds-cheapest td { background: #eaefe2; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "排版讲究的行程单（The Itinerary, Well-Typeset）",
+    "overview": "TripDesk 应当像旅行社 OP 案头那份排版讲究的行程单 / 对账单：暖纸张底色，墨黑文字，信息分层清楚，唯一的靛蓝色只在该强调处出现。服务一天处理几百单的专业操作员，安静、可信、久看不累比任何视觉花活都重要。继承 kami house style（cctools / kami.tw93.fun 同源）：暖灰中性、单一靛蓝强调、细描边、近乎无影。",
+    "keyCharacteristics": [
+      "暖纸张画布 #f5f4ed，不是纯白也不是深色",
+      "单一靛蓝强调 #1b365d，任意一屏 ≤ 5%",
+      "暖灰文字阶梯（ink→charcoal→olive→stone→silver），无冷灰",
+      "细描边 + 近乎无影，层次靠底色分层",
+      "为比价而生的信息密度",
+      "Lato 扛全部 UI，衬线只点欢迎/空态，等宽只给 ID/票号/金额"
+    ],
+    "rules": [
+      { "name": "The One Accent Rule", "body": "全站只有一个彩色强调——靛蓝；任意一屏覆盖 ≤ 5%。状态色是批注，不是第二强调。", "section": "colors" },
+      { "name": "The One Family Rule", "body": "UI 用一把 Lato；层级 = 字重 + 字号 + 颜色，不靠换字体。衬线是欢迎/空态专属点缀。", "section": "typography" },
+      { "name": "The Flat-By-Default Rule", "body": "卡片、按钮、表格静止时一律无影，靠底色和描边分层；投影只在真正浮起（抽屉/弹层）时出现。", "section": "elevation" }
+    ],
+    "dos": [
+      "用暖纸张画布 #f5f4ed + 象牙抬起面 #faf9f5；文字走墨→炭→橄榄→石暖灰阶梯。",
+      "把靛蓝当唯一强调，≤ 5%，只给主操作/选中/状态；hover 加深到 #11233f。",
+      "正文对比度 ≥ 4.5:1；弱化文字用 olive，别用更浅的灰显高级。",
+      "写操作前走 ConfirmGate；接口没返回的数据如实标未返回。",
+      "ID/票号/金额/时间用等宽字对齐；搜索结果保持可比的高密度。",
+      "底色分层 + 1px 描边表达层次；静止状态一律无影。"
+    ],
+    "donts": [
+      "回到深色霓虹科技风（深蓝黑底 + 电光蓝 #4f8cff / 霓虹绿 #2ecc71）。",
+      "做玩具/卡通感：超大圆角、带色发光/强投影、糖果色、表情堆砌。",
+      "做 OTA 花哨拥挤风（携程/Expedia/飞猪）：红黄促销色块、弹窗、满屏角标、信息过载。",
+      "引入第二个彩色强调（紫/青/橙），或用冷灰（slate/zinc/neutral）。",
+      "用渐变文字、装饰性玻璃拟态、侧边色条、每段 eyebrow 小标签、hero 大数字模板。",
+      "把衬线/等宽字用进按钮和普通 UI 标签；用胶囊文字按钮（999px）或直角（0）。"
+    ]
+  }
+}
