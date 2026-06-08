@@ -8,32 +8,35 @@
 宿主在 iframe URL 的 **片段（`#`，不是 `?`）** 里传当前登录员工身份：
 
 ```
-https://tripdesk.impo.ai/#uid=<员工稳定ID>&token=<该员工 travelkit token>&k=<embed key>
+https://tripdesk.impo.ai/#uid=<员工稳定ID>&org=<组织ID>&token=<该员工 travelkit token>&k=<embed key>
 ```
 
 | 参数 | 含义 | 稳定性 | 来源 |
 |------|------|--------|------|
-| `uid` | 员工唯一稳定标识（工号/user id），租户隔离键 | 不变 | 你方 |
-| `token` | 该员工的 travelkit token | 重登录即变 | 你方 |
+| `uid` | 员工唯一稳定标识（工号/user id） | 不变 | 你方 |
+| `org` | 该员工当前所属组织ID | 不变（同组织内） | 你方 |
+| `token` | 该员工在该 org 下的 travelkit token | 重登录即变 | 你方 |
 | `k` | embed 门禁 key | 固定 | 我方带外提供 |
+
+**租户 = `(org, uid)`**：一个员工可隶属多个 org，每个 `(org, uid)` 是独立租户（各自沙箱+历史+token）。同一 uid 切到另一个 org = 另一个工作台。`uid`、`org` **均必填**，缺任一 → `401`（无 org 不工作）。
 
 ## 接入
 
 ```html
-<iframe src="https://tripdesk.impo.ai/#uid=EMP10086&token=TK_xxx&k=THE_KEY"
+<iframe src="https://tripdesk.impo.ai/#uid=EMP10086&org=ORG42&token=TK_xxx&k=THE_KEY"
         style="width:100%;height:100%;border:0" allow="clipboard-write"></iframe>
 ```
 
 ## 规则（必须遵守）
 
 - 用 `#` 片段，**禁止**用 `?` query —— `token`/`k` 会泄漏进服务端日志和 Referer。
-- token 变了（员工重登录）→ 用 **同 `uid` + 新 `token`** 重新渲染 iframe。**别换 `uid`**（换了该员工丢历史）。我方自动把新 token 刷进其沙箱，你方无需其他动作。
+- token 变了（员工重登录）→ 用 **同 `uid`+`org` + 新 `token`** 重新渲染 iframe。**别换 `uid`/`org`**（换了该租户丢历史）。我方自动把新 token 刷进其沙箱，你方无需其他动作。
 
 ## 行为
 
 - 首次发消息为该 `uid` 开沙箱（~1 分钟），之后复用。
 - 身份只存浏览器 sessionStorage：刷新保持；关标签即清，靠你方下次渲染 iframe 重新带上恢复。**无服务端会话**，每个请求凭 URL 身份现认。
-- 缺/错 `k` 或缺 `uid` → 接口返回 `401`，前端展示「请从企业后台打开」页，不暴露任何功能。
+- **四个参数 `uid`/`org`/`token`/`k` 缺一不可**，缺任一或 `k` 错 → 接口返回 `401`，前端展示「请从企业后台打开」页，不暴露任何功能。
 - 支付=沙箱/演示：返回第三方支付链接给用户自行完成，不替付、不谎称已付。下单/支付/退改每步需用户确认。默认简体中文。
 
 ## 安全（现状 → 后续）

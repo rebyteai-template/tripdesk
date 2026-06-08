@@ -33,13 +33,18 @@ app.use('/api/app/*', async (c, next) => {
     if (key !== env.EMBED_KEY) return c.json({ error: 'forbidden' }, 401)
   }
   const uid = c.req.header('X-Tenant-Uid') || c.req.query('uid') || env.DEV_EMAIL || ''
+  const org = c.req.header('X-Tenant-Org') || c.req.query('org') || ''
   const token = c.req.header('X-Travelkit-Token') || ''
-  if (!uid) return c.json({ error: 'unauthorized' }, 401)
+  // All of the handoff must be present — uid, org AND token (k checked above). Missing any →
+  // 401, which the SPA turns into the Unauthorized page. Tenant = (org, uid): a user can be in
+  // multiple orgs, each its own tenant (own sandbox + history).
+  if (!uid || !org || !token) return c.json({ error: 'unauthorized' }, 401)
+  const tenant = `${org}:${uid}`
   const store = createD1Store(env.DB)
-  c.set('userEmail', uid)
+  c.set('userEmail', tenant)
   c.set('store', store)
   c.set('runTurn', async (taskId, _projectId, promptId, prompt) => {
-    await env.TASK_DO.getByName(taskId).runTurn(taskId, promptId, prompt, uid, token)
+    await env.TASK_DO.getByName(taskId).runTurn(taskId, promptId, prompt, tenant, token)
   })
   c.set('cancelTurn', async (promptId) => {
     const p = await store.getPrompt(promptId)
