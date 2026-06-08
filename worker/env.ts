@@ -1,8 +1,8 @@
 /**
  * Worker runtime bindings (wrangler.jsonc). Shared by the Worker entry and the
- * Durable Object. The travelkit MCP token is NOT here — it only lives inside the
- * sandbox VM's seeded .mcp.json (written by the bootstrap), so the Worker/DO never
- * sees it; they only need the rebyte relay key.
+ * Durable Object. The per-user Simplifly/travelkit token is NOT a binding here — it arrives
+ * at runtime from the iframe handoff and is written into each sandbox VM's seeded
+ * .claude/settings.json `env` (by the bootstrap); the bindings only need the rebyte relay key.
  */
 export interface Env {
   /** D1 database (tasks/prompts/frames + kv). */
