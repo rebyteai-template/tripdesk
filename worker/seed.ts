@@ -20,12 +20,18 @@ export interface ProvisionedComputer {
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
-/** The per-user travelkit credential, materialized into the sandbox. Today the token lives
- *  in .mcp.json's Authorization header; when travelkit ships as a script-in-skill the token
- *  moves there — change ONLY this function (the iframe handoff / tenant logic stay put). */
-function mcpJson(token: string): string {
+/** Simplifly Flight OpenAPI gateway root — gateway root ONLY, no endpoint path. Not a secret
+ *  (just the base URL), so it's hardcoded here per deployment. ap-east-1 region. */
+const SIMPLIFLY_BASE_URL = 'https://api-ap-east-1.simplifly.tech'
+
+/** The per-user Simplifly credential + gateway, materialized into the sandbox as Claude Code
+ *  project settings (`.claude/settings.json` `env`) so the headless agent's bash/curl sees
+ *  SIMPLIFLY_BASE_URL / SIMPLIFLY_AUTH_TOKEN. The token is the per-user travelkit token from the
+ *  iframe handoff. This is the single chokepoint for "where the token lives" — change ONLY this
+ *  function + applyCredential; the iframe handoff / tenant logic stay put. */
+function settingsJson(token: string): string {
   return JSON.stringify(
-    { mcpServers: { travelkit: { type: 'http', url: 'https://mcp.travelkit.ai/mcp', headers: { Authorization: `Bearer ${token}` } } } },
+    { env: { SIMPLIFLY_BASE_URL, SIMPLIFLY_AUTH_TOKEN: token } },
     null,
     2,
   )
@@ -62,18 +68,17 @@ async function writeFile(ac: ProvisionedComputer, rel: string, content: string):
   if (!res.ok) throw new Error(`write ${rel} failed: HTTP ${res.status}`)
 }
 
-/** Write travelkit (.mcp.json + settings + skill) into the sandbox /code. The travelkit token
+/** Write the travelkit skill + per-user Simplifly credential into the sandbox /code. The token
  *  is NOT baked into SEED_FILES (build artifact stays secret-free) — it comes per-user from the
- *  iframe handoff and is written into .mcp.json here via applyCredential. */
+ *  iframe handoff and is written into .claude/settings.json here via applyCredential. */
 export async function seedSandbox(ac: ProvisionedComputer, travelkitToken: string): Promise<void> {
   for (const [rel, content] of Object.entries(SEED_FILES)) await writeFile(ac, rel, content)
   await applyCredential(ac, travelkitToken)
 }
 
-/** Overwrite ONLY the travelkit credential (.mcp.json) in an already-provisioned sandbox —
- *  used when the user's token rotates (re-login) so we refresh in place instead of rebuilding
- *  the VM. This is the single chokepoint for "where the token lives"; the future script-in-skill
- *  migration changes only this + mcpJson(). */
+/** Overwrite ONLY the Simplifly credential (.claude/settings.json `env`) in an already-provisioned
+ *  sandbox — used when the user's token rotates (re-login) so we refresh in place instead of
+ *  rebuilding the VM. This is the single chokepoint for "where the token lives"; see settingsJson(). */
 export async function applyCredential(ac: ProvisionedComputer, travelkitToken: string): Promise<void> {
-  await writeFile(ac, '.mcp.json', mcpJson(travelkitToken))
+  await writeFile(ac, '.claude/settings.json', settingsJson(travelkitToken))
 }

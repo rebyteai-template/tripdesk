@@ -1,42 +1,69 @@
 ---
 name: travelkit
-description: TravelKit flight booking and management skill. Use for flight search, pricing, real-time price verification, order creation, payment, cancellation, refund, change, itinerary download, and TravelKit MCP integration policy. Always use this skill for TravelKit flight lifecycle tasks.
-version: 1.0.9
+description: Use this skill for TravelKit direct-HTTP flight workflows backed by Simplifly OpenAPI: flight search, known-flight pricing, real-time solution verification, original order creation, payment, order lookup, cancellation, refund, change, baggage transit, fare rules, ticket status, PNR parsing, and flight account balance lookup. This skill excludes train APIs.
 ---
 
-# TravelKit Flight Skill
+# TravelKit Flight OpenAPI Skill
 
-Keep consumer replies in Simplified Chinese unless the user requests another language. Load only the smallest reference needed for the current step; do not preload shared references unless the active workflow points to them.
+Use Simplified Chinese in normal user-facing replies unless the user asks for another language.
 
-## Fast Routing
+This skill uses Simplifly Flight OpenAPI over direct HTTP. Do not use TravelKit MCP tools for this skill unless the user explicitly asks to switch integration style.
 
-| User intent | Read | Tool(s) |
-|---|---|---|
-| Search or compare flights | [flight-search](references/flight-search.md) | `flight_search` |
-| Price a known flight number | [flight-pricing](references/flight-pricing.md) | `flight_pricing` |
-| User selects a search option | [flight-verify](references/flight-verify.md) | `flight_verify_solution` |
-| Create an order after verified price | [flight-create-order](references/flight-create-order.md) | `flight_create_order` |
-| Pay an order | [flight-pay-order](references/flight-pay-order.md) | `flight_pay_order` |
-| Look up orders | [flight-order-lookup](references/flight-order-lookup.md) | `flight_order_detail`, `flight_order_detail_by_external_id`, `flight_order_list` |
-| Invoice application | [flight-invoice](references/flight-invoice.md) | `flight_get_order_invoice_application`, `flight_create_order_invoice_application` |
-| Cancel an order | [flight-cancel](references/flight-cancel.md) | `flight_cancel_order` |
-| Refund | [flight-refund](references/flight-refund.md) | `flight_refund_quote`, `flight_refund_money_search`, `flight_refund_request`, `flight_refund_confirm` |
-| Change flight | [flight-change](references/flight-change.md) | `flight_change_search`, `flight_change_request` |
-| Download itinerary | [flight-itinerary](references/flight-itinerary.md) | `flight_download_itinerary` |
-| API key / credential issues | [mcp-connection](references/mcp-connection.md) | N/A |
+## Load Order
+
+- For direct-HTTP agent runtime instructions, read [agent-direct-http](references/agent-direct-http.md).
+- For endpoint names, request/response fields, and router availability, read [api-map](references/api-map.md).
+- For natural-language flight requirement normalization before API calls, read [requirement-analysis](references/requirement-analysis.md).
+- For shopping, pricing, verification, order creation, payment, and order lookup, read [flight-workflows](references/flight-workflows.md).
+- For cancellation, refund, and change flows, read [post-sale](references/post-sale.md).
+
+## Credentials
+
+Read credentials only from environment variables or platform-managed secret storage:
+
+- `SIMPLIFLY_BASE_URL`
+- `SIMPLIFLY_AUTH_TOKEN`
+- Optional `SIMPLIFLY_ACCEPT_LANGUAGE`, default `zh-Hans`
+- Optional `SIMPLIFLY_SF_MODE`, default `buyer`; allowed values are `buyer` or `seller`
+
+Cloud runtimes must inject the current user's `SIMPLIFLY_AUTH_TOKEN` after OAuth login completes. This skill does not fetch, store, refresh, or print user tokens.
+
+Every HTTP request must include:
+
+- URL: `SIMPLIFLY_BASE_URL` plus the endpoint path, for example `/openapi/v3/flight/shopping`
+- `Content-Type`: `application/json`
+- `Accept`: `application/json`
+- `Authorization`: `Bearer ${SIMPLIFLY_AUTH_TOKEN}`
+- `Accept-Language`: `SIMPLIFLY_ACCEPT_LANGUAGE` or `zh-Hans`
+- `X-SF-Mode`: `SIMPLIFLY_SF_MODE` or `buyer`
+
+Token-only authentication is the only supported request authentication mode. Do not use `SIMPLIFLY_OPENAPI_CODE`, `SIMPLIFLY_OPENAPI_SECRET`, `code`, `timestamp`, `signature`, SHA1 signing, or mixed token/signature authentication.
+
+Never reveal credentials, JWT tokens, raw headers, or secret-loading paths to normal users.
+Do not implement `/org/login` inside this skill; login tokens must come from environment variables or platform-managed secret storage.
+Do not add `X-Org-Id`; the current system has not enabled it.
+
+`SIMPLIFLY_BASE_URL` must come from the runtime, secret store, or deployment configuration. Do not hardcode environment-specific gateways in this skill. Set it to the gateway root only; do not include endpoint paths.
 
 ## Core Rules
 
-- Search before booking; verify real-time price before collecting passenger information or creating an order.
-- Never expose internal fields such as `solutionId`, `orderKey`, confirmation flags, raw MCP JSON, API keys, `passengerIds`, `segmentIds`, or idempotency keys to normal users.
-- Normal user-visible replies must never contain `PNR`, `airlinePnr`, airline PNR, `票号/PNR`, or `票号 / PNR`; omit or rewrite those fields even if returned, empty, or present in an error message.
-- If `TRAVELKIT_API_KEY` is missing or invalid, treat it only as a platform-managed credential issue. Never invent or output local MCP configuration snippets such as `mcpServers`, `npx`, stdio server setup, or local config JSON.
-- Never invent missing tool data. If baggage, refund/change policy, ticketing, deadline, fees, or status data is absent, say it was not returned.
-- For order creation, order lookup, and post-payment checks, use [output-rules](references/output-rules.md): total price = fare + tax.
-- Search/pricing/verify/order lookup/invoice lookup/itinerary/change-search/refund quote are read operations and can be called as needed.
-- Create order, pay, cancel, create invoice application, refund request/confirm, and change request are write operations; get explicit user confirmation for the exact action first.
-- Search stage collects only route, dates, passenger counts, cabin, and preferences. Collect ID/passport/phone/email only after price verification succeeds and the user confirms they want to proceed.
+- Search or price first; verify the selected `solutionId` immediately before collecting passenger identity details or creating an order.
+- Use the latest verified `orderKey` for original order creation.
+- Collect passenger document and phone details, plus email when available, only after verification succeeds and the user confirms they want to proceed.
+- Before write operations, summarize the exact business action and wait for explicit user confirmation. Write operations are create order, pay order, cancel order, create refund order, confirm refund order, and create change order.
+- Keep internal identifiers private unless the user is a developer asking for integration details: `solutionId`, `orderKey`, `orderID`, `passengerIds`, `segmentIds`, PNR, ticket numbers, JWT tokens, and API secrets.
+- Normal user-visible replies must not expose PNR or ticket numbers, even if the API returns them.
+- Account balance lookup is a read-only diagnostic/account operation. Call `GET /openapi/v3/flight/balance` only when the user explicitly asks about balance, account funds, credit, or balance diagnostics.
+- Do not use train endpoints from the same OpenAPI document.
+- Treat endpoints marked `x-backend-router-registered: false` as optional. If they fail or return route-not-found, fall back to mounted endpoints or tell the user the API did not return that capability.
 
-## Write Confirmation
+## Output Rules
 
-Before any write tool, summarize the business action and wait for explicit confirmation. After confirmation, set required internal confirmation fields without asking users about production or technical flags. Read [confirmation-rules](references/confirmation-rules.md) only when preparing a write operation.
+- Summarize prices from returned `priceDetail.priceList` or `priceDetail.priceTotal` when present; do not invent missing fare, tax, baggage, refund, or change policy data.
+- Default flight search recommendations must prioritize the lowest displayed total price when the user has not stated a stronger preference.
+- For ordinary flight search, request a bounded result set and summarize only compact options: default `maxResultCount: 50`, display Top 5, and never pass the full raw `data` / `solutions` payload into user-facing generation.
+- When the same itinerary is returned with multiple fare options, display the lowest sellable fare for that itinerary. Do not let raw `solutions` order, array indexes, grouping, or deduplication cause a higher fare to be shown.
+- Only show multiple prices for the same itinerary when the user explicitly asks to compare different fare products or rules.
+- Do not show full fare rules, full baggage rules, or refund/change rules in first search results; show those only after the user selects a concrete option or asks for detailed rules.
+- If an API response lacks baggage, refund, change, ticketing, deadline, or status data, say it was not returned.
+- Convert internal status data into user-safe wording. Keep raw JSON out of ordinary user replies unless the user asks for developer diagnostics.
