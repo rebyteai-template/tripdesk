@@ -29,29 +29,18 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
  *  (just the base URL), so it's hardcoded here per deployment. ap-east-1 region. */
 const SIMPLIFLY_BASE_URL = 'https://api-ap-east-1.simplifly.tech'
 
-/** The per-user Simplifly credential, written to `.claude/settings.json` `env`. NOTE: the rebyte
- *  sandbox does NOT export this `env` into the agent's shell (a live VM showed `env | grep SIMPLIFLY`
- *  empty — a known rebyte gap, see REBYTE-NEEDS.md), so this is a secondary mirror; the agent gets
- *  the credential by sourcing `.simplifly.env` (credentialsEnv). Keep both in sync — this +
- *  credentialsEnv + applyCredential are the single chokepoint for "where the token lives". */
-function settingsJson(token: string): string {
-  return JSON.stringify(
-    { env: { SIMPLIFLY_BASE_URL, SIMPLIFLY_AUTH_TOKEN: token } },
-    null,
-    2,
-  )
-}
-
-/** Sourceable shell file (`/code/.simplifly.env`) with the per-user credential — the working
- *  mechanism, since `.claude/settings.json` `env` isn't exported into the sandbox shell. SKILL.md
- *  tells the agent to `source` this before API calls. TEMPORARY stopgap until rebyte injects env
- *  natively (REBYTE-NEEDS.md). Single-quoted; the token is a JWT, so it never contains a quote. */
+/** The per-user Simplifly credential as a standard dotenv file (`/code/.simplifly.env`). The
+ *  travelkit-pro skill reads this file DIRECTLY — it searches from CWD upward for the nearest
+ *  `.simplifly.env` and parses it as dotenv (see the skill's api-map.md); it does NOT rely on shell
+ *  env vars. So this is the single source of the credential — no `.claude/settings.json` mirror, no
+ *  `source` step. Plain `KEY=value` (no `export ` prefix — not every dotenv parser strips it). The
+ *  token is a JWT (no quotes/newlines), so values need no quoting. This + applyCredential are the
+ *  single chokepoint for "where the token lives". */
 function credentialsEnv(token: string): string {
   return (
-    `# Simplifly credentials for the travelkit skill (per-user, written at sandbox seed time).\n` +
-    `# Load before each Simplifly API bash call:  set -a; source /code/.simplifly.env; set +a\n` +
-    `export SIMPLIFLY_BASE_URL='${SIMPLIFLY_BASE_URL}'\n` +
-    `export SIMPLIFLY_AUTH_TOKEN='${token}'\n`
+    `# Simplifly credentials for the travelkit-pro skill (per-user, written at sandbox seed time).\n` +
+    `SIMPLIFLY_BASE_URL=${SIMPLIFLY_BASE_URL}\n` +
+    `SIMPLIFLY_AUTH_TOKEN=${token}\n`
   )
 }
 
@@ -88,7 +77,7 @@ async function writeFile(ac: ProvisionedComputer, rel: string, content: string):
 
 /** Write the travelkit skill + per-user Simplifly credential into the sandbox /code. The token
  *  is NOT baked into SEED_FILES (build artifact stays secret-free) — it comes per-user from the
- *  iframe handoff and is written into .claude/settings.json here via applyCredential. */
+ *  iframe handoff and is written into /code/.simplifly.env here via applyCredential. */
 export async function seedSandbox(ac: ProvisionedComputer, travelkitToken: string): Promise<void> {
   await pushSeedFiles(ac)
   await applyCredential(ac, travelkitToken)
@@ -102,10 +91,24 @@ export async function pushSeedFiles(ac: ProvisionedComputer): Promise<void> {
 }
 
 /** Paths (relative to /code) an earlier seed version created that the current design no longer
- *  wants. `.mcp.json`: the legacy travelkit MCP wiring (the new skill talks direct HTTP, not MCP)
- *  — a dead server Claude Code would otherwise try to load. Add MCP-era reference docs here as the
- *  skill tree shrinks; deleting unknown extras is safe (they're already unreferenced). */
-const STALE_FILES: string[] = ['.mcp.json']
+ *  wants — really deleted from reused sandboxes at re-seed (removeStaleArtifacts). Deleting an
+ *  absent file is a no-op (grpc-status 5), so listing a path that was never written is harmless.
+ *   · `.mcp.json` — legacy travelkit MCP wiring (the skill talks direct HTTP, not MCP); a dead
+ *     server Claude Code would otherwise try to load.
+ *   · `.claude/settings.json` — legacy per-user credential mirror; no longer written (the skill
+ *     reads `.simplifly.env` directly), so the old copy must be purged to not leave a stale token.
+ *   · `.claude/skills/travelkit/**` — the old skill tree, renamed to `travelkit-pro`. The new tree
+ *     has different paths so it never overwrites these; without deletion both skills would coexist. */
+const STALE_FILES: string[] = [
+  '.mcp.json',
+  '.claude/settings.json',
+  '.claude/skills/travelkit/SKILL.md',
+  '.claude/skills/travelkit/references/api-map.md',
+  '.claude/skills/travelkit/references/requirement-analysis.md',
+  '.claude/skills/travelkit/references/agent-direct-http.md',
+  '.claude/skills/travelkit/references/post-sale.md',
+  '.claude/skills/travelkit/references/flight-workflows.md',
+]
 
 /** Wrap a protobuf message in a gRPC-Web data frame: 1 flag byte (0) + 4-byte big-endian length.
  *  Backed by a concrete ArrayBuffer so the result is a valid BlobPart under the Workers fetch types. */
@@ -171,9 +174,8 @@ export async function removeStaleArtifacts(ac: ProvisionedComputer): Promise<voi
 
 /** Write the per-user Simplifly credential into an already-provisioned sandbox — used at seed time
  *  and when the user's token rotates (re-login), refreshing in place instead of rebuilding the VM.
- *  Writes both sinks: `.simplifly.env` (the file the skill sources) and `.claude/settings.json`
- *  `env` (mirror). Single chokepoint for "where the token lives"; see credentialsEnv()/settingsJson(). */
+ *  Writes the single sink `.simplifly.env` (the dotenv file the travelkit-pro skill reads directly).
+ *  Single chokepoint for "where the token lives"; see credentialsEnv(). */
 export async function applyCredential(ac: ProvisionedComputer, travelkitToken: string): Promise<void> {
   await writeFile(ac, '.simplifly.env', credentialsEnv(travelkitToken))
-  await writeFile(ac, '.claude/settings.json', settingsJson(travelkitToken))
 }
