@@ -1,12 +1,15 @@
 /**
- * Per-user sandbox provisioning + seeding — pure fetch, Workers-native (no rebyte-sandbox
- * SDK; it drags in tar/fs and can't run on Workers).
+ * Per-user sandbox provisioning + seeding — pure fetch, Workers-native (no rebyte-sandbox SDK; it
+ * pulls node fs/tar into the bundle, AND its gRPC transport sends gateway headers that 401 against
+ * rebyte's envd — both verified, see removeFile).
  *
  *   provisionComputer() → POST /v1/agent-computers (rebyte relay API)
- *   seedSandbox()       → POST https://49983-<sandboxId>.<domain>/files (envd file API)
+ *   writeFile()         → POST https://49983-<sandboxId>.<domain>/files          (envd REST)
+ *   removeFile()        → POST https://49983-<sandboxId>.<domain>/filesystem.Filesystem/Remove
+ *                         (envd gRPC-Web — REST /files has no DELETE, returns 405)
  *
- * The envd file API takes a multipart `file` field, auth via the sandbox's own X-API-KEY,
- * and auto-creates parent dirs — all verified against a live sandbox.
+ * The envd file API takes a multipart `file` field, auth via the sandbox's own X-API-KEY, and
+ * auto-creates parent dirs — all verified against a live sandbox.
  */
 import { SEED_FILES, SEED_VERSION } from './seed-assets.generated.ts'
 import { rebyteJSON, type RebyteConfig } from '../server/rebyte/client.ts'
@@ -98,19 +101,72 @@ export async function pushSeedFiles(ac: ProvisionedComputer): Promise<void> {
   for (const [rel, content] of Object.entries(SEED_FILES)) await writeFile(ac, rel, content)
 }
 
-/** Files an earlier seed version created that the current design no longer wants. The envd file
- *  API has no DELETE (returns 405), so on re-seed we can't remove them — instead we overwrite
- *  them with inert content. `.mcp.json`: neutralize the legacy travelkit MCP wiring (the new
- *  skill talks direct HTTP, not MCP) so Claude Code can't load a dead server. Removed reference
- *  `.md` files are passive (the fresh SKILL.md no longer links them) and left as-is. */
-const STALE_NEUTRALIZE: Record<string, string> = {
-  '.mcp.json': JSON.stringify({ mcpServers: {} }, null, 2) + '\n',
+/** Paths (relative to /code) an earlier seed version created that the current design no longer
+ *  wants. `.mcp.json`: the legacy travelkit MCP wiring (the new skill talks direct HTTP, not MCP)
+ *  — a dead server Claude Code would otherwise try to load. Add MCP-era reference docs here as the
+ *  skill tree shrinks; deleting unknown extras is safe (they're already unreferenced). */
+const STALE_FILES: string[] = ['.mcp.json']
+
+/** Wrap a protobuf message in a gRPC-Web data frame: 1 flag byte (0) + 4-byte big-endian length.
+ *  Backed by a concrete ArrayBuffer so the result is a valid BlobPart under the Workers fetch types. */
+function grpcWebFrame(msg: Uint8Array): Uint8Array<ArrayBuffer> {
+  const buf = new ArrayBuffer(5 + msg.length)
+  const out = new Uint8Array(buf)
+  new DataView(buf).setUint32(1, msg.length) // out[0] flag = 0 (uncompressed data)
+  out.set(msg, 5)
+  return out
 }
 
-/** Overwrite stale artifacts with inert content. Only meaningful on re-seed of a sandbox built by
- *  an older seed version; harmless (idempotent no-op writes) otherwise. */
-export async function neutralizeStaleArtifacts(ac: ProvisionedComputer): Promise<void> {
-  for (const [rel, content] of Object.entries(STALE_NEUTRALIZE)) await writeFile(ac, rel, content)
+/** Encode a uint as a protobuf varint (path lengths can exceed 127 bytes for deep skill paths). */
+function varint(n: number): number[] {
+  const b: number[] = []
+  while (n > 0x7f) { b.push((n & 0x7f) | 0x80); n >>>= 7 }
+  b.push(n)
+  return b
+}
+
+/** Delete a file (path relative to /code) via the envd Filesystem gRPC-Web service. The REST /files
+ *  endpoint has no DELETE (405, allow: GET,HEAD,POST), but `filesystem.Filesystem/Remove` does — and
+ *  takes the SAME auth as our writes (X-API-KEY + Basic `user:`), no JWT/team_id. Hand-rolled (pure
+ *  fetch, no SDK: the SDK's transport adds gateway headers that 401 here, and drags node fs into the
+ *  Worker bundle). RemoveRequest is `{ string path = 1 }`. gRPC-Web always returns HTTP 200; the real
+ *  status is in a trailer frame — 0 = ok, 5 = NotFound (treated as success: idempotent). All verified
+ *  against a live sandbox (Remove → grpc-status:0). */
+export async function removeFile(ac: ProvisionedComputer, rel: string): Promise<void> {
+  const host = `https://49983-${ac.sandboxId}.${new URL(ac.sandboxBaseUrl).host}`
+  const pathBytes = new TextEncoder().encode('/code/' + rel)
+  // protobuf RemoveRequest: field 1 (path), wire type 2 (length-delimited) → tag 0x0a, len, bytes
+  const msg = Uint8Array.from([0x0a, ...varint(pathBytes.length), ...pathBytes])
+  const res = await fetch(`${host}/filesystem.Filesystem/Remove`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/grpc-web+proto',
+      'X-API-KEY': ac.sandboxApiKey,
+      Authorization: 'Basic ' + btoa('user:'),
+    },
+    body: new Blob([grpcWebFrame(msg)]),
+    redirect: 'follow', // connect/envoy gateways may 30x; Workers reject the default redirect:'error'
+  })
+  if (!res.ok) throw new Error(`remove ${rel} failed: HTTP ${res.status}`)
+  // grpc-status surfaces either as a response header (trailers-only) or in the body trailer frame.
+  const headerStatus = res.headers.get('grpc-status')
+  const raw = headerStatus ?? new TextDecoder().decode(await res.arrayBuffer())
+  const m = /grpc-status:?\s*(\d+)/.exec(raw)
+  const status = m ? Number(m[1]) : 0 // no trailer found on a 200 → treat as ok
+  if (status !== 0 && status !== 5) throw new Error(`remove ${rel}: grpc-status ${status}`)
+}
+
+/** Really delete stale artifacts (not overwrite-inert). Only meaningful on re-seed of a sandbox built
+ *  by an older seed version; on a clean sandbox the files are absent (grpc-status 5) and removeFile
+ *  no-ops. Best-effort per file so one failure doesn't block the rest. */
+export async function removeStaleArtifacts(ac: ProvisionedComputer): Promise<void> {
+  for (const rel of STALE_FILES) {
+    try {
+      await removeFile(ac, rel)
+    } catch (e) {
+      console.warn(`[seed] removeStaleArtifacts ${rel}:`, (e as Error).message)
+    }
+  }
 }
 
 /** Write the per-user Simplifly credential into an already-provisioned sandbox — used at seed time

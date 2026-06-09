@@ -23,14 +23,27 @@ vendored skill 的 `SKILL.md` Credentials 段加一句，指引 agent「调 API 
 
 ---
 
-## 2. skill 更新：已 provision 的沙箱里没法干净地替换 skill
+## 2. skill 更新：已 provision 的沙箱里干净替换 skill — 已解决 ✅
 
-**现象**：skill 是搬运进沙箱 `/code/.claude/skills/...` 的。上游 skill 一变，复用的老沙箱拿不到
-新版：envd 文件 API **没有 DELETE（返回 405）**，re-seed 只能「覆盖同名文件」，被删掉的旧文件
-残留在沙箱里（例如 MCP 时代的一堆 reference 文档），新旧混在一起。
+**原以为的现象**：skill 搬运进沙箱 `/code/.claude/skills/...`，上游一变老沙箱拿不到新版，
+因为 envd 的 **REST 文件 API `/files` 没有 DELETE（405，`allow: GET,HEAD,POST`）**，re-seed
+只能「覆盖同名文件」，废弃的旧文件（如 MCP 时代的 reference 文档）残留。
 
-**当前旁路（临时）**：要么 re-seed 时把已知废弃文件覆写成 inert（删不掉只能盖）；要么直接用
-debug「新 VM」按钮（顶栏 brand 连点 10 下）换一台干净沙箱、弃用旧的。
+**真相**：REST `/files` 确实没 DELETE，但 envd 另外暴露了 **gRPC-Web Filesystem 服务**
+`filesystem.Filesystem/Remove`，它**能真删**，且接受和写入相同的鉴权（`X-API-KEY` +
+`Authorization: Basic base64("user:")`，无需 JWT/team_id）。对一台 live 沙箱实测：写→200、
+`Remove`→`grpc-status:0`、再 GET→404；删不存在的文件→`grpc-status:5`（当幂等成功）。
 
-**期望 rebyte 支持**：沙箱提供「干净更新 / 替换一个 skill（含删除陈旧文件）」或「版本化 skill
-下发」的原生能力，让我们不必靠覆写或换 VM 来逼近「换 skill」。
+**现在的做法**：`worker/seed.ts` 的 `removeFile()` 手搓一个 gRPC-Web 一元调用（纯 fetch、零依赖、
+Workers 原生，和 `writeFile` 同构）。`removeStaleArtifacts()` 改成对 `STALE_FILES` 真删，re-seed
+（`seed_version` bump）时自动清理废弃文件。**不再需要**覆写 inert，也不必靠「新 VM」按钮换沙箱。
+探针：`server/rebyte/removeprobe.ts`。
+
+**为什么不用 SDK 的 `files.remove`**：rebyte-sandbox SDK 跑不进 Worker（Template 模块静态
+`import fs/tar`），即便拆出 fs-free 子入口，其 gRPC ransport 还会附带 `Rebyte-Sandbox-Id` /
+mint 出来的 `X-Access-Token` 等网关头，在 rebyte envd 上**反而 401**（实测）；其 REST `write`
+也因响应体结构不符报错。结论：rebyte envd 网关只认我们这套 raw 鉴权，手搓比 SDK 更可靠。
+
+**残留的小建议（非阻塞）**：若 rebyte 想让 SDK 可用，可① 给 envd 网关的 gRPC 路同样接受
+`X-API-KEY`（或修正 `X-Access-Token` minting 不需 team_id）；② SDK 拆一个不含 Template 的
+fs-free 入口。但 TripDesk 侧已无需求。
