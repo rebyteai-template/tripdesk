@@ -28,7 +28,7 @@ import { createD1Store } from '../server/db.ts'
 import type { Store } from '../server/store.ts'
 import { isObj, parseSSE } from '../server/rebyte/sse.ts'
 import { rebyteJSON, rebyteFetch, type RebyteConfig } from '../server/rebyte/client.ts'
-import { provisionComputer, seedSandbox, pushSeedFiles, neutralizeStaleArtifacts, applyCredential, SEED_VERSION, type ProvisionedComputer } from './seed.ts'
+import { provisionComputer, seedSandbox, pushSeedFiles, removeStaleArtifacts, applyCredential, SEED_VERSION, type ProvisionedComputer } from './seed.ts'
 import { shouldDrainTerminal } from './turn-finalize.ts'
 import { framesHaveAssistantText, unrenderedResultTexts, normText } from '../server/frame-text.ts'
 import type { Env } from './env.ts'
@@ -249,7 +249,7 @@ export class TaskDO extends DurableObject<Env> {
             if (seedStale) {
               if (travelkitToken) await seedSandbox(ac, travelkitToken)
               else await pushSeedFiles(ac) // no token at hand → refresh files only, keep credential
-              await neutralizeStaleArtifacts(ac) // envd has no DELETE → overwrite legacy .mcp.json inert
+              await removeStaleArtifacts(ac) // really delete legacy files (e.g. .mcp.json) via SDK Filesystem RPC
               await this.store.setAgentComputerSeed(email, travelkitToken ? tokenHash : (existing.tokenHash ?? ''), SEED_VERSION)
             } else {
               await applyCredential(ac, travelkitToken)

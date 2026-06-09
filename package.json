@@ -19,7 +19,8 @@
     "bootstrap:rebyte": "node --env-file=.env.local --import tsx scripts/bootstrap-rebyte.ts",
     "test": "node --import tsx --test worker/*.test.ts server/*.test.ts",
     "test:rebyte": "node --env-file=.env.local --import tsx server/rebyte/smoke.ts",
-    "test:rebyte:multiturn": "node --env-file=.env.local --import tsx server/rebyte/multiturn.ts"
+    "test:rebyte:multiturn": "node --env-file=.env.local --import tsx server/rebyte/multiturn.ts",
+    "test:rebyte:remove": "node --env-file=.env.local --import tsx server/rebyte/removeprobe.ts"
   },
   "dependencies": {
     "hono": "^4.12.10",
