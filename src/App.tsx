@@ -6,7 +6,9 @@ import { Composer, type ComposerHandle } from './components/Composer.tsx'
 import { Bench } from './components/Bench.tsx'
 import { Sidebar } from './components/Sidebar.tsx'
 import { Unauthorized } from './components/Unauthorized.tsx'
+import { CreditBanner } from './components/CreditBanner.tsx'
 import { useMe } from './hooks/useMe.ts'
+import { useCredit } from './hooks/useCredit.ts'
 import { useSessions } from './hooks/useSessions.ts'
 import { useConversation } from './hooks/useConversation.ts'
 import { useSendMessage } from './hooks/useSendMessage.ts'
@@ -29,6 +31,7 @@ import {
 export function App() {
   const me = useMe()
   const { data: sessions = [] } = useSessions(!me.isError)
+  const { data: credit } = useCredit(!me.isError)
   const { view, busy } = useConversation()
   const send = useSendMessage()
   const newVm = useNewSandbox()
@@ -82,6 +85,8 @@ export function App() {
 
   return (
     <div className="app">
+      {/* Org-wide low-credit heads-up (spans the app, above the workspace). */}
+      <CreditBanner low={credit?.low ?? false} />
       {/* Desktop has no header — controls live in the sidebar. This slim bar only
           shows on mobile, where the sidebar collapses into a drawer. */}
       <div className="mobilebar">

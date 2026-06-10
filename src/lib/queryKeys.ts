@@ -6,6 +6,7 @@
  */
 export const queryKeys = {
   me: () => ['me'] as const,
+  credit: () => ['credit'] as const,
   sessions: () => ['sessions'] as const,
   taskContent: (taskId: string) => ['taskContent', taskId] as const,
 }

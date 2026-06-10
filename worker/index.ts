@@ -12,6 +12,8 @@
 import { Hono } from 'hono'
 import { createD1Store } from '../server/db.ts'
 import { app as api, type RouteVars } from '../server/routes.ts'
+import { fetchCredit } from '../server/rebyte/credit.ts'
+import type { RebyteConfig } from '../server/rebyte/client.ts'
 import type { Env } from './env.ts'
 
 export { TaskDO } from './task-do.ts'
@@ -59,6 +61,15 @@ app.use('/api/app/*', async (c, next) => {
   // the same user serialize; it provisions + seeds a fresh sandbox and repoints the user's row.
   c.set('newSandbox', async () => {
     return env.TASK_DO.getByName(`vm:${tenant}`).reprovisionSandbox(tenant, token)
+  })
+  // Org credit (read-only) for the low-balance banner. Same relay key the DO runs on, so the
+  // balance is org-wide; the key never leaves the Worker.
+  c.set('getCredit', async () => {
+    const config: RebyteConfig = {
+      apiUrl: env.REBYTE_API_URL ?? 'https://api.rebyte.ai/v1',
+      apiKey: env.REBYTE_API_KEY,
+    }
+    return fetchCredit(config)
   })
   await next()
 })

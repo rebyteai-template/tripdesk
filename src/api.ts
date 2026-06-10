@@ -72,6 +72,15 @@ export interface SessionSummary {
 /** The signed-in user (from Cloudflare Access). 401 → not authenticated. */
 export const getMe = (): Promise<{ email: string }> => json('/me')
 
+/** Org credit for the low-balance banner. `low` is server-decided against the threshold;
+ *  `totalAvailable` is null when the relay was unreachable (→ low:false). */
+export interface CreditStatus {
+  totalAvailable: number | null
+  threshold: number
+  low: boolean
+}
+export const getCredit = (): Promise<CreditStatus> => json('/credit')
+
 /** The caller's sessions (newest first). */
 export async function listSessions(): Promise<SessionSummary[]> {
   return (await json<{ tasks: SessionSummary[] }>('/tasks')).tasks

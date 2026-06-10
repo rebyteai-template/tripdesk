@@ -74,6 +74,8 @@ export function useSendMessage() {
             activeStreams.delete(pid)
             void qc.invalidateQueries({ queryKey: queryKeys.sessions() })
             void qc.invalidateQueries({ queryKey: queryKeys.taskContent(ttid) })
+            // A turn just burned credit — refresh the balance so the banner reacts promptly.
+            void qc.invalidateQueries({ queryKey: queryKeys.credit() })
           },
         )
         activeStreams.set(pid, stop)

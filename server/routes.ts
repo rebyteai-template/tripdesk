@@ -35,7 +35,15 @@ export interface RouteVars {
   /** Debug action: provision a fresh sandbox for the caller and repoint their row at it
    *  (abandons the old VM). Returns the new sandbox id. See POST /debug/new-sandbox. */
   newSandbox: () => Promise<{ sandboxId?: string }>
+  /** The org's total available rebyte credit (org-wide, behind the Worker's relay key), or
+   *  null if the relay couldn't be reached. See GET /credit. */
+  getCredit: () => Promise<number | null>
 }
+
+/** Below this, the UI nags the org to top up. Credits run in the thousands (a turn burns a
+ *  handful), so 100 is a comfortable "nearly empty" floor. Org-level secret → the warning is
+ *  shared by all tenants of this deployment. */
+const CREDIT_LOW_THRESHOLD = 100
 
 export const app = new Hono<{ Variables: RouteVars }>()
 
@@ -49,6 +57,17 @@ async function ownedTask(store: Store, taskId: string, email: string): Promise<T
 }
 
 app.get('/me', (c) => c.json({ email: c.var.userEmail }))
+
+/** Org credit for the low-balance banner. `low` drives the UI; when the relay is unreachable
+ *  (totalAvailable null) we report `low:false` so a transient outage never falsely warns. */
+app.get('/credit', async (c) => {
+  const totalAvailable = await c.var.getCredit()
+  return c.json({
+    totalAvailable,
+    threshold: CREDIT_LOW_THRESHOLD,
+    low: totalAvailable !== null && totalAvailable < CREDIT_LOW_THRESHOLD,
+  })
+})
 
 app.get('/tasks', async (c) => {
   return c.json({ tasks: await c.var.store.listTasksByUser(c.var.userEmail) })
