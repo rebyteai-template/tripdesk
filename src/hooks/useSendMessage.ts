@@ -1,16 +1,14 @@
 import { useCallback } from 'react'
-import { useAtomValue, useSetAtom } from 'jotai'
+import { getDefaultStore, useAtomValue, useSetAtom } from 'jotai'
 import { useQueryClient } from '@tanstack/react-query'
 import { createTask, followup, streamPrompt } from '../api.ts'
 import { queryKeys } from '../lib/queryKeys.ts'
-import { benchModeAtom, taskIdAtom } from '../store/ui.ts'
-import {
-  addTurnAtom,
-  appendFrameAtom,
-  busyTasksAtom,
-  creatingAtom,
-  markBusyAtom,
-} from '../store/conversation.ts'
+import { benchModeAtom, creatingAtom, navEpochAtom, taskIdAtom } from '../store/ui.ts'
+import { addTurnAtom, appendFrameAtom, busyTasksAtom, markBusyAtom } from '../store/conversation.ts'
+
+// The Provider-less default store — lets us read live atom values AFTER an await
+// (closures captured stale values at call time).
+const store = getDefaultStore()
 
 // Active SSE closers, keyed by promptId, so a stream can be closed on done (and
 // could be closed on teardown) instead of leaking an open EventSource.
@@ -52,10 +50,14 @@ export function useSendMessage() {
       try {
         let pid: string
         if (!tid) {
+          const epochBefore = store.get(navEpochAtom)
           const r = await createTask(text)
           tid = r.taskId
-          setTaskId(r.taskId)
           pid = r.promptId
+          // Only adopt the new task as the current view if the user hasn't navigated
+          // to another (or a fresh) session while createTask was in flight. Either
+          // way the task still runs in the background and shows in the session list.
+          if (store.get(navEpochAtom) === epochBefore) setTaskId(r.taskId)
           void qc.invalidateQueries({ queryKey: queryKeys.sessions() })
         } else {
           const r = await followup(tid, text)

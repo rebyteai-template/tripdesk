@@ -61,18 +61,32 @@ export const themeAtom = atomWithStorage<'light' | 'dark'>('tripdesk-theme', 'li
 /** Hidden debug mode (revealed by tapping the brand 10×) — gates the "new VM" control. */
 export const debugAtom = atom(false)
 
+// A brand-new session has no taskId yet, so its first send is "busy" only via this
+// flag during the createTask round-trip. Lives here (not in conversation.ts) so the
+// nav actions below can clear it when the user leaves the new-session slot.
+export const creatingAtom = atom(false)
+
+// Bumped on every explicit session navigation (new / open). An in-flight createTask
+// snapshots this before awaiting and, if it changed, declines to adopt its task as
+// the current view — so a slow POST can't yank the user back after they've moved on.
+export const navEpochAtom = atom(0)
+
 /** Reset to a brand-new session (clears the task + its draft/bench state). */
-export const newSessionAtom = atom(null, (_get, set) => {
+export const newSessionAtom = atom(null, (get, set) => {
   set(taskIdAtom, null)
   set(orderDraftAtom, [])
   set(benchModeAtom, 'auto')
   set(navOpenAtom, false)
+  set(creatingAtom, false) // a prior new-session createTask must not keep this slot busy
+  set(navEpochAtom, get(navEpochAtom) + 1)
 })
 
 /** Open an existing session: switch task, reset transient bench state, close drawer. */
-export const openSessionAtom = atom(null, (_get, set, id: string) => {
+export const openSessionAtom = atom(null, (get, set, id: string) => {
   set(taskIdAtom, id)
   set(orderDraftAtom, [])
   set(benchModeAtom, 'auto')
   set(navOpenAtom, false)
+  set(creatingAtom, false)
+  set(navEpochAtom, get(navEpochAtom) + 1)
 })

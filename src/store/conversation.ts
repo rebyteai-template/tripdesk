@@ -1,6 +1,6 @@
 import { atom } from 'jotai'
 import type { PromptContent } from '../api.ts'
-import { taskIdAtom } from './ui.ts'
+import { creatingAtom, taskIdAtom } from './ui.ts'
 
 type TurnMap = Record<string, PromptContent[]>
 
@@ -67,10 +67,9 @@ export const currentTurnsAtom = atom((get) => {
 })
 
 // Busy is per-task, not global: a running session must never freeze the composer
-// or leak its loading bubble into a different (or brand-new) session. `creating`
-// covers the brief window of a new session's createTask round-trip (no id yet).
+// or leak its loading bubble into a different (or brand-new) session. The new-session
+// createTask window is covered by `creatingAtom` (in ui.ts, so nav can clear it).
 export const busyTasksAtom = atom<Set<string>>(new Set<string>())
-export const creatingAtom = atom(false)
 
 export const markBusyAtom = atom(
   null,
