@@ -6,6 +6,9 @@ import react from '@vitejs/plugin-react'
 // here in dev and same-origin in prod.
 export default defineConfig({
   plugins: [react()],
+  // Bump the persisted-query-cache buster on every build so a new deploy never
+  // hydrates a stale snapshot shaped to an old schema (see lib/queryPersist.ts).
+  define: { __BUILD_TIME__: JSON.stringify(new Date().toISOString()) },
   server: {
     host: '127.0.0.1',
     port: 4000,

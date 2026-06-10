@@ -20,6 +20,11 @@ if (TOKEN) sessionStorage.setItem('td_tk', TOKEN)
 if (KEY) sessionStorage.setItem('td_k', KEY)
 if (location.hash) history.replaceState(null, '', location.pathname + location.search)
 
+/** Tenant key for this embed session = (org, uid). Namespaces the persisted React
+ *  Query cache so one tenant's snapshot never hydrates for another in the shared
+ *  iframe. Empty when unidentified (→ no persistence). */
+export const TENANT_ID = UID ? (ORG ? `${ORG}:${UID}` : UID) : ''
+
 function authHeaders(extra?: Record<string, string>): Record<string, string> {
   const h: Record<string, string> = { ...extra }
   if (UID) h['X-Tenant-Uid'] = UID
