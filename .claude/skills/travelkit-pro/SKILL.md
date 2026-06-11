@@ -1,13 +1,18 @@
 ---
 name: travelkit-pro
-description: Use this skill for TravelKit Pro direct-HTTP flight workflows backed by Simplifly OpenAPI: flight search, known-flight pricing, solution verification, order creation, payment, order lookup, cancellation, refund, change, baggage transit, fare rules, ticket status, PNR parsing, and flight account balance lookup. This skill excludes train APIs.
+description: >-
+  Use this skill for TravelKit Pro direct-HTTP flight workflows backed by
+  Simplifly OpenAPI: flight search, known-flight pricing, solution verification,
+  order creation, payment, order lookup, cancellation, refund, change, baggage
+  transit, fare rules, ticket status, PNR parsing, and flight account balance
+  lookup.
 ---
 
 # TravelKit Pro Flight OpenAPI Skill
 
 Use Simplified Chinese in normal user-facing replies unless the user asks for another language.
 
-This skill uses Simplifly Flight OpenAPI over direct HTTP for internal cloud agents. Do not use TravelKit MCP tools unless the user explicitly asks to switch integration style. Do not call or implement train APIs.
+This skill uses Simplifly Flight OpenAPI over direct HTTP for internal cloud agents.
 
 ## Reference Routing
 
@@ -25,10 +30,11 @@ Load only the smallest reference needed for the current user intent.
 
 ## Core Boundaries
 
-- Read Simplifly configuration only from an existing external `.simplifly.env` dotenv file: `SIMPLIFLY_BASE_URL`, `SIMPLIFLY_AUTH_TOKEN`, optional `SIMPLIFLY_ACCEPT_LANGUAGE`, and optional `SIMPLIFLY_SF_MODE`. `.simplifly.env` is private local configuration and is not part of the skill. Locate the file dynamically; do not hardcode an absolute `.simplifly.env` path.
-- Never create, copy, move, modify, package, or emit `.simplifly.env`. If it is missing, stop API calls and ask the user to provide the local config file; do not create a sample, placeholder, or empty `.simplifly.env`.
+- Read Simplifly configuration from an existing external `.simplifly.env` dotenv file first, then fall back to platform-injected process environment variables when no `.simplifly.env` exists. Supported variables are `SIMPLIFLY_BASE_URL`, `SIMPLIFLY_AUTH_TOKEN`, optional `SIMPLIFLY_ACCEPT_LANGUAGE`, and optional `SIMPLIFLY_SF_MODE`.
+- `.simplifly.env` is private local configuration and is not part of the skill. Locate the file dynamically; do not hardcode an absolute `.simplifly.env` path. Never create, copy, move, modify, package, or emit `.simplifly.env`.
+- If `.simplifly.env` exists but is missing required entries, stop API calls and report missing Simplifly configuration; do not silently fall back to process environment variables. If no `.simplifly.env` exists and required process environment variables are missing, report missing Simplifly configuration without asking the user to paste tokens in chat.
 - Token-only authentication is the only supported mode. Do not use `SIMPLIFLY_OPENAPI_CODE`, `SIMPLIFLY_OPENAPI_SECRET`, `code`, `timestamp`, `signature`, SHA1 signing, or mixed token/signature authentication.
-- Do not implement `/org/login`; the token must come from `.simplifly.env`.
+- Do not implement `/org/login`; the token must come from `.simplifly.env` or platform-injected `SIMPLIFLY_AUTH_TOKEN`.
 - Do not add `X-Org-Id`; the current system has not enabled that header.
 - Never reveal credentials, JWT tokens, bearer tokens, raw headers, secret-loading paths, or raw auth errors to normal users.
 - Keep internal identifiers private unless the user is explicitly doing developer diagnostics: `solutionId`, `orderKey`, `orderID`, `passengerIds`, `segmentIds`, PNR, ticket numbers, JWT tokens, and API secrets.

@@ -4,18 +4,20 @@ Use this reference for endpoint selection, direct-HTTP authentication, request f
 
 ## Direct HTTP Runtime
 
-Agents call Simplifly Flight OpenAPI directly. This is not a public MCP capability package.
+Agents call Simplifly Flight OpenAPI directly.
 
-Required `.simplifly.env` entries:
+Supported configuration entries:
 
 - `SIMPLIFLY_BASE_URL`
 - `SIMPLIFLY_AUTH_TOKEN`
 - Optional `SIMPLIFLY_ACCEPT_LANGUAGE`, default `zh-Hans`
 - Optional `SIMPLIFLY_SF_MODE`, default `buyer`; allowed values are `buyer` or `seller`
 
-Load configuration by searching from the current working directory upward for the nearest `.simplifly.env`, then parse it as a standard dotenv file. Do not hardcode an absolute `.simplifly.env` path. If no `.simplifly.env` is found, stop before calling the API and tell the user the local Simplifly config file is missing without exposing searched paths or sensitive details.
+Load configuration by searching from the current working directory upward for the nearest `.simplifly.env`, then parse it as a standard dotenv file. Do not hardcode an absolute `.simplifly.env` path. If no `.simplifly.env` is found, read the same `SIMPLIFLY_*` names from process environment variables injected by the agent platform or server-side runtime.
 
-`.simplifly.env` is external private configuration and must never be created, copied, moved, modified, packaged, or emitted by this skill. If the nearest `.simplifly.env` is inside a `skills/` directory, treat it as invalid placement, do not use it, and ask the user to keep the file outside the skill package.
+`.simplifly.env` has priority over process environment variables. If `.simplifly.env` exists but is missing `SIMPLIFLY_BASE_URL` or `SIMPLIFLY_AUTH_TOKEN`, stop before calling the API and report missing Simplifly configuration; do not silently fall back to process environment variables. If neither source has required configuration, stop before calling the API and report missing Simplifly configuration without exposing searched paths, raw environment details, headers, or sensitive values.
+
+`.simplifly.env` is external private configuration and must never be created, copied, moved, modified, packaged, or emitted by this skill. If the nearest `.simplifly.env` is inside a `skills/` directory, treat it as invalid placement, do not use it, and ask the user to keep the file outside the skill package. Platform-injected process environment variables are also private server-side credentials; do not ask users to paste tokens in chat.
 
 Build URLs as `${SIMPLIFLY_BASE_URL}${endpoint_path}`. `SIMPLIFLY_BASE_URL` must be the gateway root and must not include endpoint paths. Do not hardcode environment-specific gateways in this skill.
 
@@ -28,7 +30,7 @@ Every request must include:
 
 Requests with a JSON body must also include `Content-Type: application/json`. GET and other no-body requests do not need `Content-Type`.
 
-Token-only authentication is required. Do not use `SIMPLIFLY_OPENAPI_CODE`, `SIMPLIFLY_OPENAPI_SECRET`, `code`, `timestamp`, `signature`, SHA1 signing, or mixed token/signature authentication. Do not implement `/org/login`; login tokens must come from `.simplifly.env`. Do not add `X-Org-Id`.
+Token-only authentication is required. Do not use `SIMPLIFLY_OPENAPI_CODE`, `SIMPLIFLY_OPENAPI_SECRET`, `code`, `timestamp`, `signature`, SHA1 signing, or mixed token/signature authentication. Do not implement `/org/login`; login tokens must come from `.simplifly.env` or platform-injected `SIMPLIFLY_AUTH_TOKEN`. Do not add `X-Org-Id`.
 
 The standard response envelope is:
 
@@ -73,7 +75,6 @@ These appeared in generated OpenAPI with `x-backend-router-registered: false`. T
 
 ## Explicitly Excluded
 
-- All `Train/V3` and `Train/V4` endpoints.
 - Any local login/token-refresh implementation inside the skill.
 
 ## Key Requests

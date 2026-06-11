@@ -14,15 +14,15 @@ Use this reference for general shopping, complex comparisons, known-flight prici
 
 ## Complex Search
 
-Handle these patterns by expanding into multiple shopping calls when needed:
+Handle these patterns by expanding into multiple shopping calls only when needed:
 
-- Round trip: create outbound and return journeys, or run separate searches and combine locally.
+- Explicit round trip: call `shopping` once with two `journeys` by default: outbound `origin -> destination` on the departure date, and return `destination -> origin` on the return date. Do not split into separate one-way shopping calls unless the user explicitly asks for separate one-way options, or the single round-trip shopping request returns no usable result and the fallback is explained.
 - Date range or flexible dates: run one shopping request per candidate date, then compare returned options.
 - Multi-airport city: use city code first, then common airport-code combinations if no results.
 - Time preferences: filter/rank returned journeys locally by departure or arrival windows.
 - Conditional searches: for example, "先查直飞，没有再看转机" means search nonstop first, then transfer options only if needed.
 
-When multiple calls are needed, summarize request assumptions, searched routes/dates, best 3-5 options, recommendation reason, and any routes/dates that returned no results. Keep every displayed option bound to its exact private solution mapping.
+When multiple calls are needed, summarize request assumptions, searched routes/dates, best 3-5 options, recommendation reason, and any routes/dates that returned no results. Fixed-date explicit round trips are not a multi-call case by default. If a single round-trip request returns no usable result and you fall back to separate outbound/return shopping calls, tell the user: `往返组合查询未返回可用结果，因此改为分别查去程/回程。` Keep every displayed option bound to its exact private solution mapping.
 
 ## Known-Flight Pricing Workflow
 
