@@ -23,12 +23,10 @@ const WINDOW_MS = 20_000
 const TURN_TIMEOUT_MS = 240_000
 const TERMINAL = new Set(['completed', 'succeeded', 'failed', 'canceled', 'cancelled'])
 
-// Mirror of worker/task-do.ts MANAGER_ROUTE_HINT: ONE routing line on the first prompt that makes
-// the front-line manager delegate flight work to the sandbox skill instead of web-searching. All
-// domain rules live in /code/CLAUDE.md + the travelkit-pro skill, not here. Keep in sync with task-do.
-const MANAGER_ROUTE_HINT =
-  '【路由】本工作区是 TripDesk 机票预订场景：所有机票相关请求一律委派沙箱里的 travelkit-pro skill ' +
-  '处理（用 sandbox / coding_agent 工具进沙箱执行），严禁用 web search 或凭记忆作答机票信息。'
+// Routing is no longer a per-prompt hint: ensureDefaultAgentComputer() configures the workspace's
+// manager (Kitty system prompt + web_search OFF) so it delegates flight work to the sandbox skill.
+// So turn 1 POSTs the user prompt verbatim — same as production task-do.ts. The web_search assertion
+// below is now a hard guarantee (the tool is disabled), kept as a regression guard.
 
 interface WindowResult { terminal: boolean; status?: string; finalResult?: string }
 
@@ -147,7 +145,7 @@ async function main() {
   console.log('[multiturn] 3/3 turn 1: POST /tasks (model resolved org-wide by relay)')
   const task = await rebyteJSON<{ id: string; status?: string }>('/tasks', {
     method: 'POST',
-    body: JSON.stringify({ prompt: `${MANAGER_ROUTE_HINT}\n\n${turns[0]}`, workspaceId: ac.id }),
+    body: JSON.stringify({ prompt: turns[0], workspaceId: ac.id }),
   })
   console.log(`[multiturn]     relayTask=${task.id}`)
 

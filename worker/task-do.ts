@@ -29,6 +29,7 @@ import type { Store } from '../server/store.ts'
 import { isObj, parseSSE } from '../server/rebyte/sse.ts'
 import { rebyteJSON, rebyteFetch, RebyteError, type RebyteConfig } from '../server/rebyte/client.ts'
 import { provisionComputer, seedSandbox, pushSeedFiles, removeStaleArtifacts, applyCredential, SEED_VERSION, type ProvisionedComputer } from './seed.ts'
+import { ensureAgentConfig } from '../server/rebyte/agent-config.ts'
 import { shouldDrainTerminal, shouldRetryWindowError, turnExpired, TERMINAL_STATUSES } from './turn-finalize.ts'
 import { framesHaveAssistantText, unrenderedResultTexts, normText } from '../server/frame-text.ts'
 import type { Env } from './env.ts'
@@ -41,16 +42,6 @@ const TURN_HARD_CAP_MS = 900_000 // absolute ceiling, even with the relay alive 
 const WINDOW_MS = 20_000 // per-alarm streaming window — short enough to never risk eviction
 const DEFAULT_API_URL = 'https://api.rebyte.ai/v1'
 const TERMINAL = TERMINAL_STATUSES
-
-/** ONE line, prepended to the first relay prompt, that steers the front-line MANAGER (agent-loop)
- *  to delegate flight work into the sandbox instead of using its web_search tool. The manager has a
- *  hardcoded system prompt + no per-workspace instruction hook in cctools, so this is the only lever
- *  (REBYTE-NEEDS.md §3). Everything else — workflow, red-lines, credential handling — lives in the VM
- *  system prompt (/code/CLAUDE.md) + the travelkit-pro skill, which the sandbox agent reads once
- *  delegated. Keep this to pure routing; do NOT re-add domain rules here. */
-const MANAGER_ROUTE_HINT =
-  '【路由】本工作区是 TripDesk 机票预订场景：所有机票相关请求一律委派沙箱里的 travelkit-pro skill ' +
-  '处理（用 sandbox / coding_agent 工具进沙箱执行），严禁用 web search 或凭记忆作答机票信息。'
 
 /** Relay event envelope (live /events + /content?include=events): {seq,eventType,payload}. */
 interface RelayEvent {
@@ -236,6 +227,7 @@ export class TaskDO extends DurableObject<Env> {
   private async agentComputerFor(email: string, travelkitToken: string): Promise<CachedAgentComputer> {
     const tokenHash = travelkitToken ? await sha256Hex(travelkitToken) : ''
     const existing = await this.store.getAgentComputer(email)
+    let result: CachedAgentComputer
     if (existing?.id) {
       // Hot-refresh of a reused sandbox (same VM, no reprovision), best-effort — a write failure
       // just leaves the old state, surfacing as an auth/skill error:
@@ -260,15 +252,28 @@ export class TaskDO extends DurableObject<Env> {
           }
         } catch { /* keep old state; user sees an auth/skill error if it's stale */ }
       }
-      return { id: existing.id, sandboxId: existing.sandboxId ?? undefined }
+      result = { id: existing.id, sandboxId: existing.sandboxId ?? undefined }
+    } else {
+      const ac = await provisionComputer(this.rebyteConfig(), `tripdesk:${email || 'anon'}`)
+      await seedSandbox(ac, travelkitToken)
+      await this.store.saveAgentComputer(email, ac.id, ac.sandboxId ?? null, tokenHash, SEED_VERSION)
+      // Re-read so concurrent provisioners converge on the same (winning) row.
+      const canonical = await this.store.getAgentComputer(email)
+      result = canonical?.id ? { id: canonical.id, sandboxId: canonical.sandboxId ?? undefined } : { id: ac.id, sandboxId: ac.sandboxId }
     }
 
-    const ac = await provisionComputer(this.rebyteConfig(), `tripdesk:${email || 'anon'}`)
-    await seedSandbox(ac, travelkitToken)
-    await this.store.saveAgentComputer(email, ac.id, ac.sandboxId ?? null, tokenHash, SEED_VERSION)
-    // Re-read so concurrent provisioners converge on the same (winning) row.
-    const canonical = await this.store.getAgentComputer(email)
-    return canonical?.id ? { id: canonical.id, sandboxId: canonical.sandboxId ?? undefined } : { id: ac.id, sandboxId: ac.sandboxId }
+    // Configure the workspace's front-line MANAGER (agent-loop): Kitty domain system prompt
+    // (cctools appends it after the base prompt) + web_search tool DISABLED, so it delegates flight
+    // work to the sandbox skill instead of web-searching/fabricating. Replaces the old per-prompt
+    // MANAGER_ROUTE_HINT (REBYTE-NEEDS.md §3 — the /v1 per-workspace config hook went live 2026-06-16).
+    // Runs once per session (first turn only; follow-ups reuse relayTaskId). Idempotent (GET→PATCH
+    // drift) and best-effort: on failure the manager falls back to its generic base prompt (soft
+    // degradation), so we log and continue rather than failing the turn.
+    try {
+      const changed = await ensureAgentConfig(result.id, this.rebyteConfig())
+      if (changed.length) console.log(`[task-do] manager config → ${result.id}: ${changed.join(', ')}`)
+    } catch (e) { console.log(`[task-do] ensureAgentConfig failed (non-fatal): ${(e as Error).message}`) }
+    return result
   }
 
   // ── RPC surface (called from the Worker via env.TASK_DO.getByName(taskId)) ──
@@ -399,18 +404,17 @@ export class TaskDO extends DurableObject<Env> {
         if (!relayTaskId) relayTaskId = (await this.store.getTask(t.taskId))?.relay_task_id ?? undefined
 
         if (!relayTaskId) {
-          // First turn: provision the per-user sandbox and create the relay task. The booking
-          // red-lines, credential handling and skill workflow live in the VM system prompt
-          // (/code/CLAUDE.md, seeded by seed.ts) + the travelkit-pro skill — the sandbox agent
-          // reads those. But the front-line MANAGER (agent-loop) has a hardcoded prompt + a
-          // web_search tool and NO per-workspace instruction hook (cctools workspace_as_agent.ts,
-          // see REBYTE-NEEDS.md §3), so without one routing line it web-searches + fabricates
-          // flights instead of delegating to the sandbox. This single line is the minimum to make
-          // the manager route into the skill; persists in the relay task's context for follow-ups.
+          // First turn: provision + configure the per-user sandbox, then create the relay task.
+          // agentComputerFor() sets the workspace's manager config (Kitty system prompt + web_search
+          // OFF) so the front-line agent-loop delegates flight work to the sandbox instead of
+          // web-searching/fabricating — no per-prompt routing line needed (REBYTE-NEEDS.md §3). The
+          // booking red-lines, credential handling and skill workflow live in the VM system prompt
+          // (/code/CLAUDE.md, seeded by seed.ts) + the travelkit-pro skill, which the delegated
+          // sandbox agent reads. So we POST the user's prompt verbatim.
           const ac = await this.agentComputerFor(t.userEmail, t.travelkitToken)
           const task = await rebyteJSON<{ id: string }>('/tasks', {
             method: 'POST',
-            body: JSON.stringify({ prompt: `${MANAGER_ROUTE_HINT}\n\n${t.prompt}`, workspaceId: ac.id }),
+            body: JSON.stringify({ prompt: t.prompt, workspaceId: ac.id }),
             config,
           })
           relayTaskId = task.id

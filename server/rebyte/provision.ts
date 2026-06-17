@@ -10,6 +10,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { env } from '../env.ts'
 import { rebyteJSON } from './client.ts'
+import { ensureAgentConfig } from './agent-config.ts'
 
 /** Shape returned by POST /agent-computers (and the GET poll). */
 export interface AgentComputer {
@@ -61,10 +62,17 @@ export async function provisionAgentComputer(name: string): Promise<AgentCompute
 /** Return the default project's VM, provisioning + persisting it on first call.
  *  Idempotent across boots via the DATA_DIR config file. */
 export async function ensureDefaultAgentComputer(name = 'tripdesk-default'): Promise<AgentComputer> {
-  const cached = loadCached()
-  if (cached) return cached
-  const ac = await provisionAgentComputer(name)
-  persist(ac)
+  let ac = loadCached()
+  if (!ac) {
+    ac = await provisionAgentComputer(name)
+    persist(ac)
+  }
+  // Idempotently apply the manager config (Kitty system prompt + web_search off) — covers both a
+  // freshly provisioned VM and a cached one provisioned before this config existed. Best-effort.
+  try {
+    const changed = await ensureAgentConfig(ac.id)
+    if (changed.length) console.log(`[provision] manager config → ${ac.id}: ${changed.join(', ')}`)
+  } catch (e) { console.log(`[provision] ensureAgentConfig failed (non-fatal): ${(e as Error).message}`) }
   return ac
 }
 
