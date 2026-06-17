@@ -11,11 +11,9 @@
 | 文档 | 状态 | 摘要 |
 |---|---|---|
 | [skill-eval-gate.md](skill-eval-gate.md) | TODO | skill 迭代验收:评分版 eval harness（`server/rebyte/eval.ts`）+ pre-deploy 手动门控,关键红线全绿才 promote 新 skill |
-| [template-layering.md](template-layering.md) | 决策锚 | 模板分层 & 三条已定结论:AI SDK 不做 streaming 地基 / streaming 缝在 `RouteVars`(没和 DO 绑死) / "rebyte SDK"≠"kit"。下面 3 篇的定位锚 |
-| [rebyte-edge-sdk.md](rebyte-edge-sdk.md) | TODO | 【改 cctools】两个 edge-native client(`@rebyte/relay` 控制面 / `@rebyte/sandbox` 基质面)+ edge checklist + typed 可续迭代器;我们手搓的可 upstream 成参考实现 |
-| [rebyte-protocol-asks.md](rebyte-protocol-asks.md) | TODO | 【改 cctools/relay】递给 Rebyte 的 6 条平台行为改动(按杠杆排序),每条注明 kit 删掉啥 = REBYTE-ISSUE/NEEDS 的"平台需求"版 |
-| [streaming-experience-contract.md](streaming-experience-contract.md) | TODO | 【改 travelkit/kit】streaming 皇冠层:可测不变量 I0–I4(frames 为源/可续/刷新重建/后端独立跑)+ load-bearing race R1–R4 + 硬化 todo(收敛重复 translate、回流 replaySubPrompt) |
-| [chat-stream-cards.md](chat-stream-cards.md) | In progress | 搜索方案卡入聊天流(L1,已落地)+ 交互UI选型:砍 R1(`ask_user_question` api 来源不可用)、L1 解析 compact 家族富卡、R2 HTML报告→PDF 北极星;待接 验价卡/写流/R2 |
+| [chat-stream-cards.md](chat-stream-cards.md) | In progress | 单列纯聊天已落地:搜索卡(L1)+验价卡+写流全内联、删左右分栏(L2);交互UI选型砍 R1(`ask_user_question` api 来源不可用);待接 下单/支付卡 + R2(HTML报告→PDF 北极星) |
+
+> **模版相关 spec 已移出**（2026-06-15）：`template-layering` / `streaming-experience-contract` / `rebyte-edge-sdk` / `rebyte-protocol-asks` / `rebyte-workspace-config-v1` 已转移到模板仓 **`rebyteai-template/rebyte-app-kit`** 的 `specs/`（kit 是这些「Rebyte 交互 / 分层」契约的 upstream 源）。本目录只留 TripDesk 的 domain 篇。
 
 ## 约定
 - 新增一篇 = 建 `specs/<kebab-name>.md` + 在上表加一行。
