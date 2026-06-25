@@ -55,7 +55,7 @@ Identify these fields when present:
 - If the user specifies a concrete booking code such as `经济Z舱`, `经济 V`, `V舱`, or `economy Q class`, parse it as `requestedBookingCode` normalized to uppercase, while keeping `cabinClass` as the full cabin such as `economy`. If only a booking code is given, default `cabinClass` to `economy` and mark that as the executable default. If the user pairs an uncommon cabin and booking code, such as `商务V舱`, preserve the stated full cabin and booking code instead of correcting it without evidence.
 - If the user does not specify passenger count, mark the parsed requirement as "用户未提供". For executable search and verification planning, use 1 adult as the default and state this execution default when needed.
 - If the user provides a city with multiple airports, use the city code first when available. If no results return, try common airport-code combinations and summarize which routes were tried.
-- If a round trip has a stay length but no exact return date, infer the return date from the stay length. 停留天数推返程日期时，the departure date counts as day 1, so return date equals departure date plus stay days minus 1.
+- If a round trip has a stay length but no exact return date, infer the return date from the stay length. 停留天数推返程日期时，the departure date counts as day 1, so return date equals departure date plus stay days minus 1. For example, `8月10日出发，玩8天返回` means outbound on 8月10日 and return on 8月17日, not 8月18日.
 - If the return destination is omitted but the outbound origin or normal return point is clear from context, infer that destination for a searchable return.
 - If the user says "左右" or gives a flexible date range, create candidate dates and compare results after shopping.
 - If text appears inconsistent, first decide whether the later text is a supplement, correction, relaxed constraint, conditional strategy, or alternative. Ask only when priority cannot be determined.
@@ -70,7 +70,7 @@ Identify these fields when present:
 - "回程没有的话，就经济": apply the fallback only to the return segment.
 - "先查直飞，没有再看转机": search nonstop first, then transfer options if needed.
 - "都帮我看下": compare all reasonable alternatives.
-- "待一周再回来" or similar stay-length wording: infer a return date or return date range before shopping.
+- "玩8天返回", "待一周再回来", "停留N天", or similar stay-length wording: infer a return date or return date range before shopping.
 
 ## Itinerary Recombination
 

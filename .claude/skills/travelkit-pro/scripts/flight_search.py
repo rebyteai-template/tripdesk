@@ -10,6 +10,7 @@ Bearer token；找不到该文件时，改从平台注入的进程环境变量�
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import os
 import re
@@ -36,17 +37,30 @@ def main() -> int:
         config = load_config()
         searches = build_search_requests(args)
         responses = []
-        for index, search in enumerate(searches, start=1):
+        for search in searches:
             payload, http_status = post_json(config, SHOPPING_ENDPOINT, search["body"])
             responses.append(
                 {
-                    "index": index,
+                    "index": len(responses) + 1,
                     "label": search["label"],
                     "body": search["body"],
                     "payload": payload,
                     "httpStatus": http_status,
                 }
             )
+            fallback_search = fallback_search_after_empty_multi_adult(search, payload)
+            if fallback_search is not None:
+                fallback_payload, fallback_http_status = post_json(config, SHOPPING_ENDPOINT, fallback_search["body"])
+                responses.append(
+                    {
+                        "index": len(responses) + 1,
+                        "label": fallback_search["label"],
+                        "body": fallback_search["body"],
+                        "payload": fallback_payload,
+                        "httpStatus": fallback_http_status,
+                        "passengerFallback": fallback_search["passengerFallback"],
+                    }
+                )
         result = build_output(responses, SHOPPING_ENDPOINT)
         print_json(result)
         return 0 if result.get("ok") else 2
@@ -370,6 +384,54 @@ def normalize_codes(values: list[str]) -> list[str]:
     return codes
 
 
+def fallback_search_after_empty_multi_adult(search: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any] | None:
+    if not response_has_empty_solutions(payload):
+        return None
+
+    passengers = search.get("body", {}).get("passengers")
+    if not isinstance(passengers, dict):
+        return None
+
+    adult = int_or_zero(passengers.get("adult"))
+    child = int_or_zero(passengers.get("child"))
+    infant = int_or_zero(passengers.get("infant"))
+    if adult <= 1 or child or infant:
+        return None
+
+    fallback_body = copy.deepcopy(search["body"])
+    fallback_body["passengers"] = {"adult": 1, "child": 0, "infant": 0}
+    fallback = {
+        "type": "single_adult_shopping_after_empty_multi_adult",
+        "reason": "original_multi_adult_shopping_returned_empty_solutions",
+        "originalPassengers": {"adult": adult, "child": child, "infant": infant},
+        "searchPassengers": fallback_body["passengers"],
+        "requiresVerificationWithOriginalPassengers": True,
+        "priceScope": "fallback_search_passenger_count",
+    }
+    return {
+        "label": f"{search['label']}（1成人回退）",
+        "body": fallback_body,
+        "passengerFallback": fallback,
+    }
+
+
+def response_has_empty_solutions(payload: dict[str, Any]) -> bool:
+    if payload.get("code") != 0:
+        return False
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return True
+    solutions = data.get("solutions")
+    return not isinstance(solutions, list) or not solutions
+
+
+def int_or_zero(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
 def post_json(config: dict[str, str], endpoint: str, body: dict[str, Any]) -> tuple[dict[str, Any], int]:
     # 使用标准库发起 HTTP POST；Authorization 只进入请求头，不进入任何输出字段。
     url = f"{config['base_url']}{endpoint}"
@@ -419,17 +481,18 @@ def build_output(
         payload = response["payload"]
         response_code = payload.get("code")
         all_response_codes.append(response_code)
-        searched_requests.append(
-            {
-                "searchIndex": response["index"],
-                "searchLabel": response["label"],
-                "request": response["body"],
-                "httpStatus": response["httpStatus"],
-                "responseCode": response_code,
-                "message": payload.get("message") or payload.get("realMessage") or "",
-                "rawResponse": payload,
-            }
-        )
+        searched_request = {
+            "searchIndex": response["index"],
+            "searchLabel": response["label"],
+            "request": response["body"],
+            "httpStatus": response["httpStatus"],
+            "responseCode": response_code,
+            "message": payload.get("message") or payload.get("realMessage") or "",
+            "rawResponse": payload,
+        }
+        if response.get("passengerFallback"):
+            searched_request["passengerFallback"] = response["passengerFallback"]
+        searched_requests.append(searched_request)
 
     ok = bool(responses) and all(code == 0 for code in all_response_codes)
     return {

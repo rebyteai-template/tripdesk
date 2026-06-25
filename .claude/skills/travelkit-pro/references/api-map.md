@@ -129,11 +129,49 @@ Verification confirms a selected `solutionId`; it does not accept concrete booki
 `FlightRequestCreateFlightOriginOrderRequest` fields:
 
 - Required by schema: `orderKey`, `passengers`, `currency`
-- Business-required: `passengerCount: { adult, child, infant }` matching the passenger array; otherwise the API returns "Passanger count error" (`1300038`)
+- Business-required: `passengerCount: { adult, child, infant }` matching the passenger array by count and passenger type; otherwise the API returns "Passanger count error" (`1300038`)
 - Contact: `contactName`, `contactRegion`, `contactPhone`; include optional `contactEmail` when available
-- `externalOrderID`: buyer-side idempotency key
+- `externalOrderID`: buyer-side idempotency key. For direct HTTP create-order calls, always use this exact field name.
 - Optional: `requireReview`, `manualRemark`
 - `passengers[]`: `surname`, `givenNames`, `gender`, `birthday`, `travelDocument`, `travelDocumentNumber`, `travelDocumentExpireDate`, `type`, `nationality`, `region`, `phone`, optional `email`, `cardNo`, `airline`
+- `passengers[].birthday`: use `YYYY-MM-DD`, e.g. `1979-04-29`; do not send compact `YYYYMMDD`.
+- `passengers[].gender`: `male` or `female`
+- `passengers[].type`: `adult`, `child`, or `infant`
+- `passengers[].travelDocument`: `passport`, `tphm`, `tptw`, `rphmt`, `idcard`, `fpidcard`, `eep`, `ttpmr`, or `hhr`
+- `passengers[].nationality`: use an ISO-style uppercase country code, e.g. `CN` for China.
+- `currency`: use the currency returned by verification/pricing. Do not maintain a guessed list of supported currencies; `CNY` is the known common value.
+
+Do not send legacy fields in create-order requests:
+
+- Top level: do not send `totalPrice`, `externalOrderId`, or `external_order_id`. Use `externalOrderID`.
+- Passenger: do not send `name`, `ageType`, `passengerType`, `credentialType`, `credentialNo`, `credentialA`, `documentType`, or `documentNumber`.
+- Map legacy passenger data before calling the tool: `credentialType`/`documentType` -> `travelDocument`, `credentialNo`/`documentNumber` -> `travelDocumentNumber`, `ageType`/`passengerType` -> `type`, and split `name` into `surname` + `givenNames`.
+
+Common passenger input aliases:
+
+- Gender: `男`, `M`, `male` -> `male`; `女`, `F`, `female` -> `female`
+- Passenger type: `ADT`, `成人`, `adult` -> `adult`; `CHD`, `儿童`, `child` -> `child`; `INF`, `婴儿`, `infant` -> `infant`
+- Travel document: `身份证`, `idcard` -> `idcard`; `护照`, `passport` -> `passport`
+- Nationality: `中国`, `中国大陆`, `CN` -> `CN`
+
+Create-order validation before calling the API:
+
+- Validate required schema fields and business-required `passengerCount`.
+- Validate passenger enum fields after alias normalization.
+- Validate `birthday` uses `YYYY-MM-DD`.
+- Validate `passengerCount` matches `passengers[]` by total and by `type`.
+- Use the latest `orderKey` returned by verification. If an order attempt reports a stale/invalid key, verify the selected solution again and rebuild the order body before retrying.
+- Apply solution limits returned by shopping/verification when present: `requiredPassengerInfos`, `allowedTravelDocuments`, `nationalityAllows`, `nationalityForbids`, and `agePairs`.
+- Report validation errors with field paths such as `passengers[0].travelDocument`; do not call the API with known-invalid values.
+
+Create-order error recovery:
+
+| Signal | Meaning | Recovery |
+|---|---|---|
+| `101001` / `参数错误` | Required field missing, wrong field name, or malformed payload | Fix local payload once using the documented schema. |
+| `1300070` / invalid order key / expired key | Stale `orderKey` | Re-run verification and use the new `orderKey`. |
+| `1300036` / `Birthday error` | Birthday format or age/type issue | Use `YYYY-MM-DD` and re-check passenger type. |
+| `1300038` / `Passanger count error` | `passengerCount` missing or mismatched | Count `passengers[].type` and send matching `{ adult, child, infant }`. |
 
 ### Payment
 
@@ -150,17 +188,19 @@ Generated OpenAPI defines this endpoint without a request body. Call with no bod
 - `journeys[]`: original or replacement journey shape
 - Optional shopping filters mirror shopping request fields
 
-Returned `solutions[].solutionId` is required for create-change. Missing, `null`, or empty string `solutionId` means that option cannot be used to create a change order.
-
 ### Create Change Order
 
-`FlightRequestCreateFlightChangeOrderRequest` fields:
+`POST /openapi/v3/flight/orders/{orderID}/change` OpenAPI request body:
 
-- Required by schema: `reason`
-- Business-required: `solutionIds`, `passengerIds`
-- Optional: `oldJourneyIndex`, `fileList`, `reasonDetail`, contact fields
+- Required: `segmentList`, `passengerIds`, `changeReason`
+- Optional: `fileList`, `reasonDetail`, `contactEmail`, `contactName`, `contactRegion`, `contactPhone`, `externalOrderId`
 
-Build `solutionIds` only from non-empty `solutions[].solutionId` values returned by change search. Do not substitute `searchKey`, `orderKey`, segment IDs, or any other field.
+`segmentList[]` fields:
+
+- Required: `id`
+- `newSegment`: `departure`, `departureDate`, `departureTime`, `arrival`, `arrivalDate`, `arrivalTime`, `flightNo`, `isCodeShare`, `opFlightNo`, `cabinClass`, `cabinCode`
+
+The flight service converts this OpenAPI body internally to `newJourneys` and `reason`; do not send those internal DTO fields directly in OpenAPI create-change requests.
 
 ### Refund
 
@@ -193,8 +233,11 @@ Shopping, pricing, verification, and change search return solution objects:
 
 Order responses return:
 
-- `id`: `orderID`, internal unless developer diagnostics
-- `status`, `orderType`, `externalOrderId`, contact fields
+- `id`: Simplifly platform `orderID`; show as `平台订单号` when the user asks for an order number, or when no external order reference is returned
+- `status`, `orderType`, `externalOrderId` / `externalOrderID` (preferred user-facing `订单号`), contact fields
+- `lastActionTime`: for `origin` and `change` orders, last payment time; for refund orders, last confirm time.
+- `lastTicketingTime`: last issuing time.
+- `lastVoidTime`: void deadline.
 - `journeys[].segments[].id`: internal segment IDs for refund/change
 - `passengers[].id`: internal passenger IDs for refund/change
 - `passengers[].tickets[]`: contains ticket numbers and PNR; do not show to ordinary users

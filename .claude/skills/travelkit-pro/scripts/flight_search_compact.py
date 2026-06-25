@@ -12,6 +12,7 @@ import argparse
 import json
 import re
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -68,7 +69,14 @@ def main() -> int:
     args = parse_args()
     try:
         raw = read_json(Path(args.input))
-        compact = compact_search_output(raw, args.max_per_section, args.transfer_max_minutes)
+        excluded_solution_ids = read_excluded_solution_ids(args.exclude_compact_file or [])
+        compact = compact_search_output(
+            raw,
+            args.max_per_section,
+            args.transfer_max_minutes,
+            start_option_number=args.start_option_number,
+            excluded_solution_ids=excluded_solution_ids,
+        )
         print_json(compact, Path(args.output) if args.output else None)
         return 0 if compact.get("ok") else 2
     except CompactError as exc:
@@ -82,10 +90,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", help="Optional output JSON path. Defaults to stdout.")
     parser.add_argument("--max-per-section", type=int, default=2, help="Recommended options per time section")
     parser.add_argument(
+        "--start-option-number",
+        type=int,
+        default=1,
+        help="First displayed option number. Use for follow-up result batches.",
+    )
+    parser.add_argument(
+        "--exclude-compact-file",
+        action="append",
+        help="Previous compact JSON whose displayed solutionIds should be excluded. May be passed multiple times.",
+    )
+    parser.add_argument(
         "--transfer-max-minutes",
         type=int,
         default=8 * 60,
-        help="Maximum total duration for transfer options in default recommendations",
+        help="Maximum layover duration for transfer options in default recommendations",
     )
     return parser.parse_args()
 
@@ -102,11 +121,35 @@ def read_json(path: Path) -> dict[str, Any]:
     return value
 
 
-def compact_search_output(raw: dict[str, Any], max_per_section: int, transfer_max_minutes: int) -> dict[str, Any]:
+def read_excluded_solution_ids(paths: list[str]) -> set[str]:
+    excluded = set()
+    for path_text in paths:
+        compact = read_json(Path(path_text))
+        mapping = compact.get("displayMapping")
+        if not isinstance(mapping, dict):
+            raise CompactError(f"Exclude compact JSON is missing displayMapping: {path_text}")
+        for item in mapping.values():
+            if not isinstance(item, dict):
+                continue
+            solution_id = item.get("solutionId")
+            if isinstance(solution_id, str) and solution_id:
+                excluded.add(solution_id)
+    return excluded
+
+
+def compact_search_output(
+    raw: dict[str, Any],
+    max_per_section: int,
+    transfer_max_minutes: int,
+    start_option_number: int = 1,
+    excluded_solution_ids: set[str] | None = None,
+) -> dict[str, Any]:
     if max_per_section <= 0:
         raise CompactError("--max-per-section must be greater than zero.")
     if transfer_max_minutes <= 0:
         raise CompactError("--transfer-max-minutes must be greater than zero.")
+    if start_option_number <= 0:
+        raise CompactError("--start-option-number must be greater than zero.")
 
     searched = raw.get("searchedRequests")
     if not isinstance(searched, list):
@@ -115,10 +158,11 @@ def compact_search_output(raw: dict[str, Any], max_per_section: int, transfer_ma
     compact_requests = []
     global_options = []
     global_mapping = {}
-    next_option_number = 1
+    next_option_number = start_option_number
+    excluded_solution_ids = excluded_solution_ids or set()
 
     for request in searched:
-        compact_request = compact_searched_request(request, max_per_section, transfer_max_minutes)
+        compact_request = compact_searched_request(request, max_per_section, transfer_max_minutes, excluded_solution_ids)
         renumbered_options = []
         renumbered_mapping = {}
         for option in compact_request["displayOptions"]:
@@ -145,6 +189,8 @@ def compact_search_output(raw: dict[str, Any], max_per_section: int, transfer_ma
         "summary": {
             "searchCount": len(compact_requests),
             "displayOptionCount": len(global_options),
+            "startOptionNumber": start_option_number,
+            "excludedSolutionCount": len(excluded_solution_ids),
         },
     }
 
@@ -153,8 +199,10 @@ def compact_searched_request(
     request: dict[str, Any],
     max_per_section: int,
     transfer_max_minutes: int,
+    excluded_solution_ids: set[str],
 ) -> dict[str, Any]:
     raw_response = request.get("rawResponse") or {}
+    passenger_fallback = request.get("passengerFallback") if isinstance(request.get("passengerFallback"), dict) else None
     data = raw_response.get("data") or {}
     segments = data.get("segments") or {}
     solutions = data.get("solutions") or []
@@ -173,14 +221,25 @@ def compact_searched_request(
             continue
         candidate = normalize_solution(solution, segments, index, warnings)
         if candidate is not None:
+            if passenger_fallback is not None:
+                candidate["passengerFallback"] = passenger_fallback
             candidates.append(candidate)
 
-    baggage_candidates = dedupe_candidates([item for item in candidates if item["hasCheckedBaggage"]])
-    all_candidates = dedupe_candidates(candidates)
-    recommendation_candidates = [
+    display_candidates = [
+        item
+        for item in candidates
+        if not (isinstance(item.get("solutionId"), str) and item["solutionId"] in excluded_solution_ids)
+    ]
+
+    baggage_candidates = dedupe_candidates([item for item in display_candidates if item["hasCheckedBaggage"]])
+    all_candidates = dedupe_candidates(display_candidates)
+    direct_candidates = [item for item in baggage_candidates if item["transferCount"] == 0]
+    transfer_candidates = [
         item
         for item in baggage_candidates
-        if item["transferCount"] == 0 or item["durationMinutes"] <= transfer_max_minutes
+        if item["transferCount"] > 0
+        and item["maxTransferLayoverMinutes"] is not None
+        and item["maxTransferLayoverMinutes"] <= transfer_max_minutes
     ]
 
     sections = []
@@ -188,7 +247,7 @@ def compact_searched_request(
     for label, start_minute, end_minute in TIME_SECTIONS:
         section_candidates = [
             item
-            for item in recommendation_candidates
+            for item in direct_candidates
             if start_minute <= item["firstDepartureMinute"] < end_minute
         ]
         options = sorted(section_candidates, key=sort_key)[:max_per_section]
@@ -201,6 +260,8 @@ def compact_searched_request(
             }
         )
 
+    transfer_options = sorted(transfer_candidates, key=sort_key)[:max_per_section]
+    selected.extend(("中转推荐", option) for option in transfer_options)
     selected_candidates = [item for _, item in selected]
     cheapest_recommended = min((item["price"]["amount"] for item in selected_candidates), default=None)
     low_price_reminder = None
@@ -225,11 +286,14 @@ def compact_searched_request(
         "searchIndex": request.get("searchIndex"),
         "searchLabel": request.get("searchLabel"),
         "request": request.get("request"),
+        "passengerFallback": passenger_fallback,
         "responseCode": request.get("responseCode"),
         "message": sanitize_text(request.get("message") or ""),
         "candidateCount": len(candidates),
+        "excludedCandidateCount": len(candidates) - len(display_candidates),
         "uniqueCandidateCount": len(all_candidates),
         "sections": sections,
+        "transferRecommendations": [public_option(item, 0, section="中转推荐") for item in transfer_options],
         "lowPriceReminder": public_option(low_price_reminder, 0) if low_price_reminder else None,
         "displayOptions": display_options,
         "displayMapping": display_mapping,
@@ -260,6 +324,7 @@ def normalize_solution(
     first_departure_minute = None
     total_duration_minutes = 0
     transfer_count = 0
+    transfer_layover_minutes = []
 
     for journey_index, journey in enumerate(journeys):
         if not isinstance(journey, dict):
@@ -303,8 +368,10 @@ def normalize_solution(
         journey_duration = duration_to_minutes(journey.get("duration")) or sum(
             duration_to_minutes(segment["flightTime"]) or 0 for segment in normalized_segments
         )
+        journey_layovers = transfer_layovers(normalized_segments)
         total_duration_minutes += journey_duration
         transfer_count += max(len(normalized_segments) - 1, int_or_zero(journey.get("transferNum")))
+        transfer_layover_minutes.extend(journey_layovers)
         checked_summaries.extend(journey_checked)
 
         normalized_journeys.append(
@@ -319,6 +386,10 @@ def normalize_solution(
                 "duration": minutes_to_duration(journey_duration),
                 "durationMinutes": journey_duration,
                 "transferCount": max(len(normalized_segments) - 1, int_or_zero(journey.get("transferNum"))),
+                "transferLayoverDurations": [
+                    minutes_to_duration(item) if item is not None else None for item in journey_layovers
+                ],
+                "transferLayoverMinutes": journey_layovers,
                 "segments": normalized_segments,
             }
         )
@@ -328,6 +399,8 @@ def normalize_solution(
     cabin_display = summarize_cabin(cabin_parts)
     first_journey = normalized_journeys[0]
     last_journey = normalized_journeys[-1]
+    missing_layover = transfer_count > 0 and any(item is None for item in transfer_layover_minutes)
+    max_layover = None if missing_layover else max(transfer_layover_minutes, default=None)
 
     return {
         "dedupeKey": (
@@ -347,6 +420,8 @@ def normalize_solution(
         "duration": minutes_to_duration(total_duration_minutes),
         "durationMinutes": total_duration_minutes,
         "transferCount": transfer_count,
+        "maxTransferLayoverMinutes": max_layover,
+        "maxTransferLayoverDuration": minutes_to_duration(max_layover) if max_layover is not None else None,
         "firstDepartureMinute": first_departure_minute if first_departure_minute is not None else 0,
     }
 
@@ -385,10 +460,7 @@ def compute_price(price_detail: dict[str, Any]) -> dict[str, Any] | None:
                 continue
             count = int_or_one(item.get("num"))
             currency = currency or item.get("currency")
-            if item.get("publishPrice") is not None:
-                total += (float(item["publishPrice"]) + float(item.get("tax") or 0)) * count
-                has_value = True
-            elif item.get("salePrice") is not None:
+            if item.get("salePrice") is not None:
                 total += float(item["salePrice"]) * count
                 has_value = True
             elif item.get("price") is not None:
@@ -452,16 +524,20 @@ def public_option(candidate: dict[str, Any] | None, option_number: int, section:
         "journeys": candidate["journeys"],
         "duration": candidate["duration"],
         "durationMinutes": candidate["durationMinutes"],
+        "maxTransferLayoverDuration": candidate["maxTransferLayoverDuration"],
+        "maxTransferLayoverMinutes": candidate["maxTransferLayoverMinutes"],
         "cabin": candidate["cabin"],
         "baggage": candidate["baggage"],
         "hasCheckedBaggage": candidate["hasCheckedBaggage"],
         "price": candidate["price"],
     }
+    if candidate.get("passengerFallback"):
+        option["passengerFallback"] = candidate["passengerFallback"]
     return option
 
 
 def private_mapping(candidate: dict[str, Any]) -> dict[str, Any]:
-    return {
+    mapping = {
         "solutionId": candidate.get("solutionId"),
         "source": candidate.get("source"),
         "journeys": candidate["journeys"],
@@ -469,7 +545,12 @@ def private_mapping(candidate: dict[str, Any]) -> dict[str, Any]:
         "cabin": candidate["cabin"],
         "baggage": candidate["baggage"],
         "hasCheckedBaggage": candidate["hasCheckedBaggage"],
+        "maxTransferLayoverDuration": candidate["maxTransferLayoverDuration"],
+        "maxTransferLayoverMinutes": candidate["maxTransferLayoverMinutes"],
     }
+    if candidate.get("passengerFallback"):
+        mapping["passengerFallback"] = candidate["passengerFallback"]
+    return mapping
 
 
 def journey_type(candidate: dict[str, Any]) -> str:
@@ -520,6 +601,27 @@ def time_to_minutes(value: Any) -> int:
     if not match:
         return 0
     return int(match.group(1)) * 60 + int(match.group(2))
+
+
+def transfer_layovers(segments: list[dict[str, Any]]) -> list[int | None]:
+    layovers = []
+    for previous, current in zip(segments, segments[1:]):
+        previous_arrival = segment_datetime(previous["arrivalDate"], previous["arrivalTime"])
+        current_departure = segment_datetime(current["departureDate"], current["departureTime"])
+        if previous_arrival is None or current_departure is None:
+            layovers.append(None)
+            continue
+        minutes = int((current_departure - previous_arrival).total_seconds() // 60)
+        layovers.append(minutes if minutes >= 0 else None)
+    return layovers
+
+
+def segment_datetime(date_value: Any, time_value: Any) -> datetime | None:
+    text = f"{date_value or ''} {time_value or ''}"
+    try:
+        return datetime.strptime(text, "%Y-%m-%d %H:%M")
+    except ValueError:
+        return None
 
 
 def duration_to_minutes(value: Any) -> int:

@@ -205,11 +205,7 @@ def price_breakdown_display(price_detail: dict[str, Any]) -> str | None:
             continue
         count = flight_search_compact.int_or_one(item.get("num"))
         currency = item.get("currency") or price_detail.get("currency") or "CNY"
-        if item.get("publishPrice") is not None:
-            fare = float(item["publishPrice"]) * count
-            tax = float(item.get("tax") or 0) * count
-            parts.append(f"票价 {format_money(fare, currency)} + 税费 {format_money(tax, currency)}")
-        elif item.get("salePrice") is not None:
+        if item.get("salePrice") is not None:
             parts.append(f"价格 {format_money(float(item['salePrice']) * count, currency)}")
         elif item.get("price") is not None:
             fare = float(item.get("price") or 0) * count

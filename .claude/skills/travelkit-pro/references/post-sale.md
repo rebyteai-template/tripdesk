@@ -61,21 +61,20 @@ Use when the refund flow requires a second confirmation after review.
 3. Call `change_search(order_id, body)`.
 4. Present user-safe change options using `output-rules.md`: route, departure, arrival, duration, cabin, price difference, and service fee when returned.
 5. Keep `solutionId` internal.
-6. Filter out any change-search option whose `solutionId` is missing, `null`, or an empty string. Only options with a non-empty string `solutionId` may be shown as selectable change options.
-7. Invalid options may be summarized as diagnostics, but the user must not be allowed to select them for change creation.
 
 ## Create Change Order
 
-1. User selects a valid change option from change search.
-2. Build `solutionIds` from the selected internal option. `solutionIds` must be a non-empty array, and every value must be a non-empty string.
-3. Do not call `create_change_order` when there is no valid `solutionId`; tell the user that no change order was created because the API did not return a valid change option ID.
-4. Build `passengerIds` from selected passengers.
-5. Build the body with documented fields only: `solutionIds`, `passengerIds`, `reason`, optional `oldJourneyIndex`, `fileList`, `reasonDetail`, and contact fields when available.
-6. Do not invent alternate field names or retry with speculative payload shapes.
-7. Confirm the change request, including any price difference, service fee, affected passengers, and new itinerary.
-8. After explicit confirmation, call `create_change_order(order_id, body)` once with the confirmed payload.
-9. If the API returns `Parameters error`, missing business fields, or repeated parameter validation failures after a documented payload, stop retrying speculative variants. Explain that the API did not accept the documented change-order payload, keep internal IDs hidden, and offer a safe fallback when available.
-10. Summarize returned change order status if successful.
+1. User selects a change option from change search.
+2. Build `passengerIds` from selected passengers.
+3. Build `segmentList` from the original segment ID and the selected replacement flight details.
+4. For each `segmentList[]` item, set `id` to the original segment ID and `newSegment` to the replacement segment fields: `departure`, `departureDate`, `departureTime`, `arrival`, `arrivalDate`, `arrivalTime`, `flightNo`, optional `isCodeShare`, `opFlightNo`, `cabinClass`, and `cabinCode`.
+5. Build the body with documented OpenAPI fields only: `segmentList`, `passengerIds`, `changeReason`, optional `fileList`, `reasonDetail`, `contactEmail`, `contactName`, `contactRegion`, `contactPhone`, and `externalOrderId`.
+6. Do not send internal service DTO fields such as `newJourneys`, `reason`, `oldJourneyIndex`, or `solutionIds` in OpenAPI create-change requests.
+7. Do not invent alternate field names or retry with speculative payload shapes.
+8. Confirm the change request, including any price difference, service fee, affected passengers, and new itinerary.
+9. After explicit confirmation, call `create_change_order(order_id, body)` once with the confirmed payload.
+10. If the API returns `Parameters error`, missing business fields, or repeated parameter validation failures after a documented payload, stop retrying speculative variants. Explain that the API did not accept the documented change-order payload, keep internal IDs hidden, and offer a safe fallback when available.
+11. Summarize returned change order status if successful.
 
 ## Change Failure Fallback
 

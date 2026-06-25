@@ -8,7 +8,6 @@ Do not expose these fields in ordinary user replies:
 
 - `solutionId`
 - `orderKey`
-- `orderID` unless needed for developer diagnostics
 - `passengerIds`, `segmentIds`, raw passenger IDs, raw segment IDs
 - PNR, `pnr`, `airlinePnr`
 - ticket numbers, `ticketNo`
@@ -19,16 +18,27 @@ Normal user-visible replies must never contain PNR or ticket numbers, even if re
 
 Search script stdout is agent-internal raw API input. Before replying to a user, pass ordinary search raw output through `scripts/flight_search_compact.py --input <raw-json>` when available, then summarize the compact output into the fixed search output formats below. Do not paste `rawResponse`, raw request/response envelopes, compact JSON, `data.solutions`, `data.segments`, `solutionId`, `orderKey`, credentials, PNR, or ticket numbers.
 
+## Order Number Presentation
+
+Order numbers are user-facing operational references, not ticketing secrets.
+
+- Prefer `externalOrderId` or `externalOrderID` as the displayed `订单号`.
+- If no external order reference is returned, or if the user explicitly asks for the order number needed for lookup, refund, payment, or customer support, show returned `id` / `orderID` as `平台订单号`.
+- When a direct-HTTP tool returns `orderReferences`, use that object first. Show `orderReferences.displayOrderNumber` with `orderReferences.displayOrderNumberLabel`. If it includes `submittedExternalOrderID` but no response-side external id, say `提交的外部订单号` instead of claiming the API returned it.
+- In order creation, order lookup, payment, refund, change, and cancellation summaries, include whichever order reference is available.
+- If both are returned, show both as `订单号` and `平台订单号`.
+- Never output an empty order-number label. If `orderReferences.available` is false and no order id is present in the tool result, say the API did not return a displayable order number.
+- Do not say that platform rules prevent showing an order number. The redaction boundary is PNR, ticket numbers, passenger IDs, segment IDs, `solutionId`, `orderKey`, credentials, and raw JSON.
+
 ## Price Rules
 
 Summarize prices only from returned data:
 
-- Prefer the sum of `(priceDetail.priceList[].publishPrice + tax) * num`.
-- If `publishPrice` is missing, use `salePrice * num`.
-- If both `publishPrice` and `salePrice` are missing, use `(price + tax) * num`.
+- Prefer the sum of `priceDetail.priceList[].salePrice * num`.
+- If `salePrice` is missing, use `(price + tax) * num`.
 - If itemized price fields are absent, use `priceDetail.priceTotal` when present.
 
-For ordinary user-facing replies, do not expose internal price field names such as `publishPrice`, `salePrice`, `price + tax`, or describe the internal price-priority logic. When showing `价格明细`, render `publishPrice` as `票价` and `tax` as `税费`, for example `票价 ¥1400 + 税费 ¥200`. If a script output includes `priceBreakdownDisplay`, use that exact user-facing string. Mention `salePrice` only when the user explicitly asks for developer diagnostics or raw field comparison.
+For ordinary user-facing replies, do not expose internal price field names such as `publishPrice`, `salePrice`, `price + tax`, or describe the internal price-priority logic. Treat `publishPrice` as a reference field only, not as the user-facing price source. If a script output includes `priceBreakdownDisplay`, use that exact user-facing string. Mention `salePrice` only when the user explicitly asks for developer diagnostics or raw field comparison.
 
 Do not invent missing fare, tax, baggage, refund/change policy, service fee, ticketing, deadline, or status data. If a field is absent, say it was not returned.
 
@@ -36,30 +46,45 @@ When multiple solutions have the same flight combination, route, departure time,
 
 ## Ordinary Search Output
 
-Use this fixed table format for ordinary one-way or ordinary single-search results:
+Use this fixed Markdown table format only for flight candidate results returned by a search. This includes ordinary one-way, round-trip, and multi-city search results, plus concrete candidate itinerary details inside complex search results. Do not apply this seven-column table to verification, order confirmation, payment, refund, change, itinerary download, or copy-mode replies.
 
 `序号 | 航程 | 行程详情 | 时长 | 舱位 | 行李额 | 价格`
 
 Field rules:
 
 - `序号` is the displayed option number and must stay bound to the private mapping used for verification.
-- One complete itinerary option owns one `序号`. For round-trip or multi-city options, use one row per journey; in Markdown show the `序号` only on the first row and leave later rows blank.
+- `序号` must not be reused within the same search conversation. Follow-up tables such as `其他直飞方案（续）` must continue from the previous highest displayed number instead of restarting local numbering.
+- One complete itinerary option owns one `序号`. For round-trip or multi-city options, use one row per journey; in Markdown show the `序号` only on the first row. For later journey rows, write `&nbsp;` in `序号`.
+- `价格` appears only on the first row of one complete itinerary option, for example `¥1,280`. For later journey rows, write `&nbsp;` in `价格`.
 - `航程` contains direction plus transfer count: `单程直飞`, `单程中转x次`, `去程直飞`, `回程中转x次`, `第一程直飞`, `第二程中转x次`. Transfer count equals segment count minus 1. A stopover without aircraft change remains `直飞`; add `经停xxx` in `行程详情`.
-- `行程详情` contains one flight segment per line: `MU5186  10月05日  北京大兴(PKX) -> 上海浦东(PVG)  07:45 - 10:05+1`. Always include the departure date after the flight number. For ordinary search tables, keep overnight arrivals as `+1` on the arrival time instead of expanding the arrival date.
-- `时长` contains total duration plus transfer durations when returned or derivable, for example `总时长12h30<br>中转时长3h15` or `总时长22h20<br>第一次中转时长7h12<br>第二次中转时长2h05`.
+- `行程详情` contains one flight segment per line in this exact style: `MU5186 北京大兴（PKX） → 上海浦东（PVG） 07:45 - 10:05`. Use Chinese airport names followed by full-width parentheses around the IATA code. Use `→`, not `->`. Do not include the departure date by default. Add dates only for cross-day flights, same-day options that would otherwise be ambiguous, or when the user explicitly asks for dates. For ordinary search tables, keep overnight arrivals as `+1` on the arrival time when a compact cross-day marker is enough.
+- For transfer journeys, put multiple flight segments in one `行程详情` cell separated by `<br>`, for example `MU5101 上海浦东（PVG） → 西安咸阳（XIY） 08:20 - 10:55<br>MU2105 西安咸阳（XIY） → 北京大兴（PKX） 13:10 - 15:05`.
+- `时长` contains total duration plus transfer durations when returned or derivable, using compact `h/m` duration format and full-width colon, for example `总时长：2h20m` or `总时长：6h45m<br>中转时长：2h15m`. For multiple transfers, use `第一次中转时长：7h12m<br>第二次中转时长：2h05m`.
 - `舱位` contains display cabin plus booking code when returned, for example `经济舱 H舱` or `商务舱 C舱`. If the booking code is missing, show the returned cabin name and `待确认`; do not invent a booking code.
+- For transfer journeys, put segment cabins in one `舱位` cell separated by `<br>`, for example `经济舱 M舱<br>经济舱 K舱`.
 - `行李额` contains checked baggage allowance as pieces and weight when returned, for example `1件，23kg/件` or `2件，32kg/件`. If checked baggage is missing or not included, write `无托运/未返回` and do not put the option in the default recommendation section.
 - For known-flight pricing with a requested booking code, if price is returned for the matching booking code but baggage rules are missing, show the price and write `未返回/待确认` for baggage. Do not display baggage from a different booking code on the same flight.
-- `价格` contains only the displayed total price, for example `¥620`; include tax scope only when returned or already derivable from the source data.
-- Do not put price in `时长`; do not put duration in `行程详情`; do not leave `价格` empty when a displayed price is derivable. Preserve source option order unless the active recommendation policy or user request requires sorting.
+- `价格` contains only the displayed total price, for example `¥620` or `¥1,280`; include tax scope only when returned or already derivable from the source data.
+- Do not put price in `时长`; do not put duration in `行程详情`; do not leave the first-row `价格` empty when a displayed price is derivable. Preserve source option order unless the active recommendation policy or user request requires sorting.
+- When rendering the table in Markdown, include the standard separator row and use `<br>` for intra-cell line breaks. Later rows in the same option must use `&nbsp;` for intentionally blank `序号` and `价格` cells, matching this style:
+
+`| 序号 | 航程 | 行程详情 | 时长 | 舱位 | 行李额 | 价格 |`
+
+`| --- | --- | --- | --- | --- | --- | --- |`
+
+`| 1 | 去程直飞 | MU5186 北京大兴（PKX） → 上海浦东（PVG） 07:45 - 10:05 | 总时长：2h20m | 经济舱 Y舱 | 1件，23kg/件 | ¥1,280 |`
+
+`| &nbsp; | 回程中转1次 | MU5101 上海浦东（PVG） → 西安咸阳（XIY） 08:20 - 10:55<br>MU2105 西安咸阳（XIY） → 北京大兴（PKX） 13:10 - 15:05 | 总时长：6h45m<br>中转时长：2h15m | 经济舱 M舱<br>经济舱 K舱 | 1件，23kg/件 | &nbsp; |`
 
 Default ordinary search sections when the user has no display preference:
 
-1. `推荐方案`: this must be visibly grouped into exactly four time sections in this order: `早 06:00-12:00`, `中 12:00-18:00`, `晚 18:00-24:00`, and `凌晨 24:00-06:00`. In each time section, show up to two cheapest baggage-qualified direct options whose first departure time is in that section. Also include up to two cheapest baggage-qualified transfer options with total duration less than 8 hours in the time section of their first departure. If a section has no qualifying option, still show that section and write `无符合默认推荐条件的方案`. Do not merge all default recommendations into one ungrouped table.
+1. `推荐方案`: this must be visibly grouped into exactly four direct-flight time sections in this order: `早 06:00-12:00`, `中 12:00-18:00`, `晚 18:00-24:00`, and `凌晨 24:00-06:00`. In each time section, show up to two cheapest baggage-qualified direct options whose first departure time is in that section. Also include a separate transfer recommendation group with up to two cheapest baggage-qualified transfer options across all transfer candidates. Exclude transfer options where any single layover/wait time is greater than 8 hours; this is a layover-time limit, not a total-itinerary-duration limit. If a direct time section has no qualifying option, still show that section and write `无符合默认推荐条件的方案`. Do not merge all default recommendations into one ungrouped table.
 2. `低价提醒`: if a no-checked-baggage or baggage-missing option is cheaper than the cheapest recommended baggage-qualified option, show only the single cheapest such option and label it `不含托运行李/行李未返回`; do not mix it into `推荐方案`.
 3. `下一步`: ask the user to reply with a displayed option number for verification.
 
 When the user states a display preference, follow the user's preference instead of the default sections, while still showing baggage status for displayed options when returned.
+
+If a displayed search option contains `passengerFallback`, its search price is from the fallback passenger count, usually a 1-adult search pool after the original multi-adult shopping request returned no candidates. Until the option is verified with `passengerFallback.originalPassengers`, label the price as `1成人搜索价，需按原人数验价` or equivalent. After verification succeeds, replace it with the verified total for the original passenger count and say it has been verified for that passenger count. Never present a fallback search price as the confirmed total for multiple passengers.
 
 When the user requests a concrete booking code such as `Z`, `V`, `E`, or `Q`, display only solutions that matched the requested `cabinCode` or `subCabinCode`; do not use the default four time-section recommendation layout for that response. Show the cabin as `经济舱 Z舱`, `经济舱 V舱`, or the equivalent returned cabin plus booking code. If a returned option lacks a concrete booking code, show `经济舱（未返回具体舱位）` or the equivalent returned cabin, and do not count it as a match for the requested booking code.
 
@@ -81,7 +106,7 @@ Use this fixed structure for complex results requiring multiple shopping calls, 
 
 1. `查询请求`: passenger count, cabin, searched date range, route/city assumptions, and user preferences.
 2. `推荐方案`: by default, visibly group best combinations into exactly four time sections in this order: `早 06:00-12:00`, `中 12:00-18:00`, `晚 18:00-24:00`, and `凌晨 24:00-06:00`. For one-way complex searches, group by the first departure time. For round-trip or multi-city searches, group by the first journey's first departure time. In each section, show up to two cheapest baggage-qualified options. If a section has no qualifying option, still show that section and write `无符合默认推荐条件的方案`. Columns: `方案`, `去程`, `回程`, `往返总价`, `推荐理由`. For one-way complex searches, replace `回程` with `-`.
-3. `方案详情`: expand each recommended option with flight number, itinerary, time, cabin, price, and checked baggage allowance if returned.
+3. `方案详情`: when showing concrete search-result candidate itineraries, expand each recommended option using the fixed seven-column ordinary search table format. Include flight number, itinerary, time, cabin, price, and checked baggage allowance if returned. Do not extend this table requirement to verification, order confirmation, payment, refund, change, itinerary download, or copy-mode replies.
 4. `低价提醒`: when the default policy is active and a no-checked-baggage or baggage-missing option is cheaper than the cheapest baggage-qualified recommendation, show only the single cheapest such option.
 5. `候选摘要`: when expansion was used, show separate outbound/return candidate summaries, up to 5 rows each.
 6. `未返回结果`: list searched dates/routes that returned no results; omit if every searched route/date returned options.
@@ -90,7 +115,9 @@ Use this fixed structure for complex results requiring multiple shopping calls, 
 Rules:
 
 - Keep option numbers stable across sections.
+- Keep option numbers globally unique across follow-up result tables in the same search conversation.
 - Every displayed option must map to the exact lowest-fare `solutionId` used for the displayed price.
+- For `passengerFallback` options, the mapped `solutionId` may come from a fallback passenger-count search; verify it with the original passenger count before treating the price as confirmed.
 - Do not expose internal IDs, raw API responses, signatures, credentials, PNR, or ticket numbers.
 - Unless the user explicitly asks for a different display preference, ordinary and complex search replies must contain all four default time sections plus `低价提醒` and `下一步`. If any required section is missing, rewrite the reply before sending it.
 
