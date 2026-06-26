@@ -17,6 +17,8 @@
 import { Hono } from 'hono'
 import { streamSSE } from 'hono/streaming'
 import type { Store, Task } from './store.ts'
+import { MAX_UPLOAD_BYTES, attachmentPromptSuffix } from './attachments.ts'
+import type { FileRef } from './rebyte/client.ts'
 import { framesHaveAssistantText, unrenderedResultTexts } from './frame-text.ts'
 
 /** Single default project (no project picker in this build). */
@@ -26,8 +28,11 @@ export const DEFAULT_PROJECT_ID = 'default'
 export interface RouteVars {
   userEmail: string
   store: Store
-  runTurn: (taskId: string, projectId: string, promptId: string, prompt: string) => Promise<void>
+  runTurn: (taskId: string, projectId: string, promptId: string, prompt: string, opts?: { files?: FileRef[] }) => Promise<void>
   cancelTurn: (promptId: string) => Promise<boolean>
+  /** Upload one file to the relay (mint signed URL + stream the Blob); returns its FileRef. The ref
+   *  rides on a turn and is staged into the workspace VM at /code/<filename>. See POST /files. */
+  uploadFile: (file: File) => Promise<FileRef>
   /** Backfill a finalized-but-empty turn's answer from the backend into the store
    *  (the stream may have stopped before it persisted). Returns true if it recovered
    *  something. See GET /tasks/:id/content. */
@@ -56,6 +61,18 @@ async function ownedTask(store: Store, taskId: string, email: string): Promise<T
   return task
 }
 
+/** Validate + derive a turn's prompts from the request body, or null when neither text nor a file
+ *  is present (→ 400). `text` is the stored UI text (empty for an image-only send); `wirePrompt` is
+ *  what the relay sees — the text plus the one-line attachment directive — and is ALWAYS non-empty
+ *  for a valid turn (so an image-only send clears the relay's empty-prompt check). Shared by both
+ *  POST handlers so the load-bearing stored-text↔wire-prompt split lives in exactly one place. */
+function turnPrompts(body: { prompt?: string; files?: FileRef[] }): { text: string; wirePrompt: string; files: FileRef[] } | null {
+  const text = body.prompt?.trim() ? body.prompt : ''
+  const files = body.files ?? []
+  if (!text && !files.length) return null
+  return { text, wirePrompt: text + attachmentPromptSuffix(files), files }
+}
+
 app.get('/me', (c) => c.json({ email: c.var.userEmail }))
 
 /** Org credit for the low-balance banner. `low` drives the UI; when the relay is unreachable
@@ -75,14 +92,15 @@ app.get('/tasks', async (c) => {
 
 app.post('/tasks', async (c) => {
   const { store, runTurn, userEmail } = c.var
-  const { prompt } = await c.req.json<{ prompt?: string }>()
-  if (!prompt?.trim()) return c.json({ error: 'prompt is required' }, 400)
+  const turn = turnPrompts(await c.req.json<{ prompt?: string; files?: FileRef[] }>())
+  if (!turn) return c.json({ error: 'prompt is required' }, 400)
 
   const taskId = crypto.randomUUID()
   const promptId = crypto.randomUUID()
   await store.createTask(taskId, DEFAULT_PROJECT_ID, userEmail)
-  await store.createPrompt(promptId, taskId, prompt)
-  await runTurn(taskId, DEFAULT_PROJECT_ID, promptId, prompt)
+  await store.createPrompt(promptId, taskId, turn.text) // stored UI text — empty for image-only (bubble = thumbnail)
+  await store.linkPromptFiles(promptId, turn.files.map((f) => f.id)) // bubble attachments (display)
+  await runTurn(taskId, DEFAULT_PROJECT_ID, promptId, turn.wirePrompt, { files: turn.files })
 
   return c.json({ taskId, promptId })
 })
@@ -93,15 +111,55 @@ app.post('/tasks/:id/prompts', async (c) => {
   const task = await ownedTask(store, taskId, userEmail)
   if (!task) return c.json({ error: 'task not found' }, 404)
 
-  const { prompt } = await c.req.json<{ prompt?: string }>()
-  if (!prompt?.trim()) return c.json({ error: 'prompt is required' }, 400)
+  const turn = turnPrompts(await c.req.json<{ prompt?: string; files?: FileRef[] }>())
+  if (!turn) return c.json({ error: 'prompt is required' }, 400)
 
   const promptId = crypto.randomUUID()
-  await store.createPrompt(promptId, taskId, prompt)
+  await store.createPrompt(promptId, taskId, turn.text) // stored UI text — empty for image-only
+  await store.linkPromptFiles(promptId, turn.files.map((f) => f.id)) // bubble attachments (display)
   await store.setTaskStatus(taskId, 'running')
-  await runTurn(taskId, task.project_id, promptId, prompt)
+  await runTurn(taskId, task.project_id, promptId, turn.wirePrompt, { files: turn.files })
 
   return c.json({ promptId })
+})
+
+app.post('/files', async (c) => {
+  // Eager upload of ONE attachment (multipart): `file` (the original → relay → staged into the
+  // sandbox at /code/<filename>) plus optional `thumb`/`large` WebP renditions, persisted keyed by
+  // the returned file id for the chat bubble + lightbox. Returns the FileRef the next turn rides on.
+  const { uploadFile, store, userEmail } = c.var
+  const form = await c.req.formData()
+  const file = form.get('file')
+  if (!(file instanceof File)) return c.json({ error: 'no file' }, 400)
+  // Server-side cap (defense in depth — the Composer already gates, but a bypassed client can't get
+  // past this). Checked on file.size, before reading the body into Worker memory.
+  if (file.size > MAX_UPLOAD_BYTES) return c.json({ error: 'file too large' }, 413)
+  const thumb = form.get('thumb')
+  const large = form.get('large')
+  // Decode the WebP renditions concurrently (D1 bind needs ArrayBuffers). The original is NOT copied
+  // into a second buffer — uploadFile streams the File straight to the relay PUT.
+  const [thumbBytes, largeBytes] = await Promise.all([
+    thumb instanceof File ? thumb.arrayBuffer() : Promise.resolve(null),
+    large instanceof File ? large.arrayBuffer() : Promise.resolve(null),
+  ])
+  const ref = await uploadFile(file)
+  await store.saveAttachment(ref.id, userEmail, file.name, file.type, thumbBytes, largeBytes)
+  return c.json({ id: ref.id, filename: ref.filename })
+})
+
+app.get('/files/:fileId', async (c) => {
+  // Authed image serve: stream a stored WebP rendition (thumb|large) for the bubble/lightbox.
+  // Scoped to the uploader's tenant (org:uid) — the Worker holds ONE relay org key, so this check
+  // is the real per-tenant gate. `<img>` can't set headers, so the tenant identity rides in the
+  // query (withAuthQuery client-side, query fallback in worker/index.ts) — same as the SSE stream.
+  const { store, userEmail } = c.var
+  const size = c.req.query('size') === 'large' ? 'large' : 'thumb'
+  const att = await store.getAttachment(c.req.param('fileId'), size)
+  if (!att || att.userEmail !== userEmail) return c.json({ error: 'not found' }, 404)
+  return c.body(att.bytes, 200, {
+    'Content-Type': 'image/webp',
+    'Cache-Control': 'private, max-age=31536000, immutable',
+  })
 })
 
 app.get('/tasks/:id/content', async (c) => {
@@ -119,7 +177,10 @@ app.get('/tasks/:id/content', async (c) => {
       // own — ask the backend to backfill, then re-read. No-op for turns already whole.
       const needsHeal = p.status !== 'running' && (!framesHaveAssistantText(frames) || unrenderedResultTexts(frames).length > 0)
       if (needsHeal && (await c.var.recoverPrompt(task.id, p.id))) frames = await store.framesSince(p.id, 0)
-      return { id: p.id, prompt: p.prompt, status: p.status, frames }
+      // Metadata only — the client derives the rendition URLs (single source: api.toAttachment), so
+      // the reloaded bubble matches the optimistic one (streaming-experience-contract I0).
+      const attachments = await store.listPromptAttachments(p.id)
+      return { id: p.id, prompt: p.prompt, status: p.status, frames, attachments }
     }),
   )
   return c.json({ task: { id: task.id, status: task.status }, prompts })

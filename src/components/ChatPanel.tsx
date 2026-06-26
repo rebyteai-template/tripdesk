@@ -1,8 +1,10 @@
-import { useEffect, useRef, type ReactNode } from 'react'
+import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { ChatBubble, FareVerification } from '../frames.ts'
 import { Markdown } from './Markdown.tsx'
 import { FlightCompareCards } from './FlightCompareCards.tsx'
 import { FareDetailCard } from './FareDetailCard.tsx'
+import { FileCard } from './FileCard.tsx'
+import { Lightbox } from './Lightbox.tsx'
 
 // Cold-start quick actions. The travelkit-pro skill's only sensible entry point is
 // flight search (order/refund/PNR all need prior context), so each is a one-tap search
@@ -39,6 +41,7 @@ export function ChatPanel({
   children?: ReactNode
 }) {
   const endRef = useRef<HTMLDivElement>(null)
+  const [lightbox, setLightbox] = useState<string | null>(null)
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [chat.length, busy, !!children])
 
   return (
@@ -78,6 +81,32 @@ export function ChatPanel({
               </div>
             )
           }
+          // User attachments render STANDALONE (not inside the accent bubble), right-aligned with
+          // the sender; the text bubble (if any) follows below — ChatGPT-style. Images are clickable
+          // thumbnails (→ lightbox); non-images render the shared FileCard.
+          if (b.attachments?.length) {
+            return (
+              <Fragment key={b.key}>
+                <div className={`msg-attachments ${b.role}`}>
+                  {b.attachments.map((a) =>
+                    a.contentType.startsWith('image/') ? (
+                      <img
+                        key={a.fileId}
+                        className="msg-thumb"
+                        src={a.thumbUrl}
+                        alt={a.filename}
+                        loading="lazy"
+                        onClick={() => setLightbox(a.largeUrl)}
+                      />
+                    ) : (
+                      <FileCard key={a.fileId} filename={a.filename} contentType={a.contentType} />
+                    ),
+                  )}
+                </div>
+                {b.text ? <div className={`bubble ${b.role}`}>{b.text}</div> : null}
+              </Fragment>
+            )
+          }
           return (
             <div key={b.key} className={`bubble ${b.role}${b.error ? ' error' : ''}`}>
               {b.role === 'assistant' && !b.error ? <Markdown text={b.text} /> : b.text}
@@ -89,6 +118,7 @@ export function ChatPanel({
       {children}
       {busy ? <div className="bubble assistant typing">正在处理…</div> : null}
       <div ref={endRef} />
+      {lightbox && <Lightbox src={lightbox} onClose={() => setLightbox(null)} />}
     </div>
   )
 }

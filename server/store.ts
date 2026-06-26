@@ -51,6 +51,14 @@ export interface Frame {
   data: unknown
 }
 
+/** A prompt's display attachment (metadata only; the WebP rendition BLOBs are fetched
+ *  separately by the authed serve route, keyed by fileId). */
+export interface AttachmentMeta {
+  fileId: string
+  filename: string
+  contentType: string
+}
+
 export interface Store {
   createTask(id: string, projectId: string, userEmail: string): Promise<void>
   getTask(id: string): Promise<Task | undefined>
@@ -80,4 +88,22 @@ export interface Store {
 
   appendFrame(promptId: string, seq: number, data: unknown): Promise<void>
   framesSince(promptId: string, fromSeq: number): Promise<Frame[]>
+
+  // ── image/file attachments (display channel; see migrations/0005) ──────────
+  /** Persist a file's display renditions (WebP BLOBs), keyed by the relay file id. Idempotent
+   *  (INSERT OR REPLACE). Non-image files pass null blobs (chip-only). user_email = embed tenant. */
+  saveAttachment(
+    fileId: string,
+    userEmail: string,
+    filename: string,
+    contentType: string,
+    thumb: ArrayBuffer | null,
+    large: ArrayBuffer | null,
+  ): Promise<void>
+  /** One rendition's bytes + owner tenant, for the authed serve route (undefined if absent). */
+  getAttachment(fileId: string, size: 'thumb' | 'large'): Promise<{ userEmail: string; bytes: ArrayBuffer } | undefined>
+  /** Associate an ordered list of uploaded file ids with a prompt (for bubble display). */
+  linkPromptFiles(promptId: string, fileIds: string[]): Promise<void>
+  /** A prompt's attachments (metadata only), ordered as sent. */
+  listPromptAttachments(promptId: string): Promise<AttachmentMeta[]>
 }

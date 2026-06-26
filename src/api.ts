@@ -54,11 +54,31 @@ async function json<T>(path: string, init?: RequestInit): Promise<T> {
 const postJson = <T>(path: string, body: unknown): Promise<T> =>
   json<T>(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
 
+/** Per-attachment metadata: relay file id + name + type. The server sends it on /content, and the
+ *  composer also emits it on send — `toAttachment` derives the rendition URLs from it either way. */
+export interface AttachmentMeta {
+  fileId: string
+  filename: string
+  contentType: string
+}
+
+/** A bubble attachment with its authed rendition URLs (the `<img src>` targets,
+ *  GET /api/app/files/:id?size=…&<tenant>) — rendered above the user bubble. */
+export interface Attachment extends AttachmentMeta {
+  thumbUrl: string
+  largeUrl: string
+}
+
+/** A reference to an uploaded file (relay temp-file id + normalized name). Rides on a turn to
+ *  stage it into the agent's sandbox at /code/<filename>. */
+export interface FileRef { id: string; filename: string }
+
 export interface PromptContent {
   id: string
   prompt: string
   status?: string
   frames: { seq: number; data: unknown }[]
+  attachments?: Attachment[]
 }
 
 /** One conversation in the per-user session list. */
@@ -86,11 +106,41 @@ export async function listSessions(): Promise<SessionSummary[]> {
   return (await json<{ tasks: SessionSummary[] }>('/tasks')).tasks
 }
 
-export const createTask = (prompt: string): Promise<{ taskId: string; promptId: string }> =>
-  postJson('/tasks', { prompt })
+/** Authed URL for a stored image rendition (the chat bubble / lightbox `<img src>`). The tenant
+ *  identity rides in the QUERY (withAuthQuery), not a header — `<img>` can't set headers and we
+ *  have no auth cookie (identity comes via the embed handoff). Same pattern as the SSE stream. */
+export const fileUrl = (fileId: string, size: 'thumb' | 'large'): string =>
+  withAuthQuery(`${BASE}/files/${fileId}`, { size })
 
-export const followup = (taskId: string, prompt: string): Promise<{ promptId: string }> =>
-  postJson(`/tasks/${taskId}/prompts`, { prompt })
+/** Derive a bubble Attachment from server metadata — the ONE place rendition URLs are built, so the
+ *  optimistic (send) and reloaded (/content) views are byte-identical (streaming I0). */
+export const toAttachment = (m: AttachmentMeta): Attachment => ({
+  ...m,
+  thumbUrl: fileUrl(m.fileId, 'thumb'),
+  largeUrl: fileUrl(m.fileId, 'large'),
+})
+
+/** Eager-upload ONE file (multipart) via the worker: it PUTs the original to the relay (staged into
+ *  the sandbox next turn) and stores the WebP `thumb`/`large` renditions for display. Returns the
+ *  FileRef. authHeaders() carries the tenant identity; content-type is left to the browser so it
+ *  sets the multipart boundary. */
+export async function uploadFile(file: File, renditions: { thumb: Blob; large: Blob } | null): Promise<FileRef> {
+  const fd = new FormData()
+  fd.append('file', file)
+  if (renditions) {
+    fd.append('thumb', renditions.thumb, 'thumb.webp')
+    fd.append('large', renditions.large, 'large.webp')
+  }
+  const r = await fetch(`${BASE}/files`, { method: 'POST', headers: authHeaders(), body: fd })
+  if (!r.ok) throw new Error(`upload failed: ${r.status}`)
+  return (await r.json()) as FileRef
+}
+
+export const createTask = (prompt: string, files?: FileRef[]): Promise<{ taskId: string; promptId: string }> =>
+  postJson('/tasks', files?.length ? { prompt, files } : { prompt })
+
+export const followup = (taskId: string, prompt: string, files?: FileRef[]): Promise<{ promptId: string }> =>
+  postJson(`/tasks/${taskId}/prompts`, files?.length ? { prompt, files } : { prompt })
 
 /** Debug-only: provision a fresh sandbox VM for the caller (old one abandoned). Slow — it waits
  *  for the VM to boot. Hidden behind the sidebar-brand 10-click easter egg in App.tsx. */
@@ -102,7 +152,13 @@ export async function loadContent(
   const r = await fetch(`${BASE}/tasks/${taskId}/content`, { headers: authHeaders() })
   if (r.status === 404) return null
   if (!r.ok) throw new Error(`loadContent failed: ${r.status}`)
-  return r.json()
+  const data = (await r.json()) as {
+    task: { id: string; status: string }
+    prompts: Array<Omit<PromptContent, 'attachments'> & { attachments?: AttachmentMeta[] }>
+  }
+  // Derive rendition URLs client-side (single source: toAttachment) so a reload matches the
+  // optimistic view the composer built with the same helper (I0).
+  return { task: data.task, prompts: data.prompts.map((p) => ({ ...p, attachments: p.attachments?.map(toAttachment) })) }
 }
 
 /** Streams frames for a prompt. Calls onFrame per frame, onDone when the turn

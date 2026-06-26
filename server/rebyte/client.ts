@@ -63,3 +63,23 @@ export async function rebyteJSON<T = unknown>(path: string, opts: RebyteInit = {
   if (!text) return {} as T
   try { return JSON.parse(text) as T } catch { throw new RebyteError(res.status, `非 JSON 响应：${path}`) }
 }
+
+/** A reference to an uploaded file: the relay temp-file id + its (normalized) name. Passed on a
+ *  turn (createTask/addPrompt) to stage the file into the workspace VM at /code/<filename>. */
+export interface FileRef { id: string; filename: string }
+
+/** Upload one file via the relay's public file API: mint a signed URL (POST /files, API_KEY) then
+ *  PUT the raw bytes to it (the signed URL carries its own auth — no API_KEY on the PUT). Returns
+ *  the FileRef the next turn rides on; the relay stages the file into the sandbox at /code/<name>. */
+export async function uploadFileToRelay(config: RebyteConfig, file: File): Promise<FileRef> {
+  const ct = file.type || 'application/octet-stream'
+  const minted = await rebyteJSON<{ id: string; filename: string; uploadUrl: string }>('/files', {
+    method: 'POST',
+    body: JSON.stringify({ filename: file.name, contentType: ct }),
+    config,
+  })
+  // PUT the original straight from the Blob — fetch streams it, no full-size ArrayBuffer copy.
+  const put = await fetch(minted.uploadUrl, { method: 'PUT', headers: { 'Content-Type': ct }, body: file })
+  if (!put.ok) throw new RebyteError(put.status, `file upload PUT failed: HTTP ${put.status}`)
+  return { id: minted.id, filename: minted.filename }
+}

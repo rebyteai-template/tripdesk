@@ -27,7 +27,7 @@ import { DurableObject } from 'cloudflare:workers'
 import { createD1Store } from '../server/db.ts'
 import type { Store } from '../server/store.ts'
 import { isObj, parseSSE } from '../server/rebyte/sse.ts'
-import { rebyteJSON, rebyteFetch, RebyteError, type RebyteConfig } from '../server/rebyte/client.ts'
+import { rebyteJSON, rebyteFetch, RebyteError, type RebyteConfig, type FileRef } from '../server/rebyte/client.ts'
 import { provisionComputer, seedSandbox, pushSeedFiles, removeStaleArtifacts, applyCredential, SEED_VERSION, type ProvisionedComputer } from './seed.ts'
 import { ensureAgentConfig } from '../server/rebyte/agent-config.ts'
 import { shouldDrainTerminal, shouldRetryWindowError, turnExpired, TERMINAL_STATUSES } from './turn-finalize.ts'
@@ -61,6 +61,9 @@ interface TurnState {
   /** The caller's travelkit token (from the iframe handoff), seeded into their sandbox on
    *  first turn. Only consumed at provision time; harmless on follow-ups. */
   travelkitToken: string
+  /** Relay file refs uploaded this turn — staged into the sandbox at /code/<filename> by the
+   *  relay's `files` mechanism (create on first turn, /prompts on follow-ups). */
+  files?: FileRef[]
   relayTaskId?: string
   /** Did this turn already submit its prompt to the relay (create or /prompts)?
    *  Guards a retried alarm from double-submitting after a window/eviction. */
@@ -278,13 +281,14 @@ export class TaskDO extends DurableObject<Env> {
 
   // ── RPC surface (called from the Worker via env.TASK_DO.getByName(taskId)) ──
   /** Persist the turn intent and fire the alarm. Returns immediately; the alarm drives it. */
-  async runTurn(taskId: string, promptId: string, prompt: string, userEmail = '', travelkitToken = ''): Promise<void> {
+  async runTurn(taskId: string, promptId: string, prompt: string, userEmail = '', travelkitToken = '', files?: FileRef[]): Promise<void> {
     const t: TurnState = {
       taskId,
       promptId,
       prompt,
       userEmail,
       travelkitToken,
+      files,
       submitted: false,
       lastRelaySeq: 0,
       sawText: false,
@@ -414,7 +418,9 @@ export class TaskDO extends DurableObject<Env> {
           const ac = await this.agentComputerFor(t.userEmail, t.travelkitToken)
           const task = await rebyteJSON<{ id: string }>('/tasks', {
             method: 'POST',
-            body: JSON.stringify({ prompt: t.prompt, workspaceId: ac.id }),
+            // `files` (if any) ride here so the relay stages them into the sandbox /code/<filename>
+            // before the first turn runs; the wire prompt's attachment suffix points the manager at them.
+            body: JSON.stringify({ prompt: t.prompt, workspaceId: ac.id, ...(t.files?.length ? { files: t.files } : {}) }),
             config,
           })
           relayTaskId = task.id
@@ -425,7 +431,8 @@ export class TaskDO extends DurableObject<Env> {
           // user's prompt alone. /events then streams this latest prompt.
           await rebyteJSON(`/tasks/${relayTaskId}/prompts`, {
             method: 'POST',
-            body: JSON.stringify({ prompt: t.prompt }),
+            // Follow-up files stage into the SAME sandbox before this prompt runs.
+            body: JSON.stringify({ prompt: t.prompt, ...(t.files?.length ? { files: t.files } : {}) }),
             config,
           })
         }

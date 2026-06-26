@@ -13,10 +13,17 @@ import { Hono } from 'hono'
 import { createD1Store } from '../server/db.ts'
 import { app as api, type RouteVars } from '../server/routes.ts'
 import { fetchCredit } from '../server/rebyte/credit.ts'
-import type { RebyteConfig } from '../server/rebyte/client.ts'
+import { uploadFileToRelay, type RebyteConfig } from '../server/rebyte/client.ts'
 import type { Env } from './env.ts'
 
 export { TaskDO } from './task-do.ts'
+
+/** Relay config from env (endpoint default + org key) — used by every relay call the Worker makes
+ *  directly (file upload, credit). The key never leaves the Worker. */
+const rebyteConfig = (env: Env): RebyteConfig => ({
+  apiUrl: env.REBYTE_API_URL ?? 'https://api.rebyte.ai/v1',
+  apiKey: env.REBYTE_API_KEY,
+})
 
 const app = new Hono<{ Bindings: Env; Variables: RouteVars }>()
 
@@ -46,9 +53,13 @@ app.use('/api/app/*', async (c, next) => {
   const store = createD1Store(env.DB)
   c.set('userEmail', tenant)
   c.set('store', store)
-  c.set('runTurn', async (taskId, _projectId, promptId, prompt) => {
-    await env.TASK_DO.getByName(taskId).runTurn(taskId, promptId, prompt, tenant, token)
+  c.set('runTurn', async (taskId, _projectId, promptId, prompt, opts) => {
+    await env.TASK_DO.getByName(taskId).runTurn(taskId, promptId, prompt, tenant, token, opts?.files)
   })
+  // Upload one attachment via the relay's public file API (mint signed URL + stream the Blob). The
+  // returned FileRef rides on a later turn (createTask/addPrompt) and stages the file into the
+  // sandbox at /code/<filename>.
+  c.set('uploadFile', (file) => uploadFileToRelay(rebyteConfig(env), file))
   c.set('cancelTurn', async (promptId) => {
     const p = await store.getPrompt(promptId)
     if (!p) return false
@@ -64,13 +75,7 @@ app.use('/api/app/*', async (c, next) => {
   })
   // Org credit (read-only) for the low-balance banner. Same relay key the DO runs on, so the
   // balance is org-wide; the key never leaves the Worker.
-  c.set('getCredit', async () => {
-    const config: RebyteConfig = {
-      apiUrl: env.REBYTE_API_URL ?? 'https://api.rebyte.ai/v1',
-      apiKey: env.REBYTE_API_KEY,
-    }
-    return fetchCredit(config)
-  })
+  c.set('getCredit', () => fetchCredit(rebyteConfig(env)))
   await next()
 })
 

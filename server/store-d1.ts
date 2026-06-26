@@ -8,7 +8,7 @@
  * migrations/0001_init.sql (applied via `wrangler d1 migrations apply`), so unlike
  * the old better-sqlite3 driver this file does no CREATE TABLE / PRAGMA at runtime.
  */
-import type { Store, Task, Prompt, TaskSummary, AgentComputerRow } from './store.ts'
+import type { Store, Task, Prompt, TaskSummary, AgentComputerRow, AttachmentMeta } from './store.ts'
 
 export function createD1Store(db: D1Database): Store {
   return {
@@ -113,6 +113,49 @@ export function createD1Store(db: D1Database): Store {
         .bind(promptId, fromSeq)
         .all<{ seq: number; data: string }>()
       return results.map((r) => ({ seq: r.seq, data: JSON.parse(r.data) as unknown }))
+    },
+
+    async saveAttachment(fileId, userEmail, filename, contentType, thumb, large) {
+      await db
+        .prepare(`INSERT OR REPLACE INTO attachments (file_id, user_email, filename, content_type, thumb, large) VALUES (?, ?, ?, ?, ?, ?)`)
+        .bind(fileId, userEmail, filename, contentType, thumb, large)
+        .run()
+    },
+    async getAttachment(fileId, size) {
+      const col = size === 'large' ? 'large' : 'thumb' // closed set → safe to inline
+      const row = await db
+        .prepare(`SELECT user_email AS userEmail, ${col} AS bytes FROM attachments WHERE file_id = ?`)
+        .bind(fileId)
+        .first<{ userEmail: string; bytes: ArrayBuffer | ArrayBufferView | number[] | null }>()
+      if (!row || row.bytes == null) return undefined
+      // D1 returns a BLOB as ArrayBuffer (prod Workers) or number[] (local miniflare). Copy into a
+      // fresh ArrayBuffer — else c.body() stringifies a number[] into a corrupt CSV of byte values.
+      const b = row.bytes
+      const src = b instanceof ArrayBuffer
+        ? new Uint8Array(b)
+        : ArrayBuffer.isView(b)
+          ? new Uint8Array(b.buffer, b.byteOffset, b.byteLength)
+          : Uint8Array.from(b)
+      const bytes = new ArrayBuffer(src.byteLength)
+      new Uint8Array(bytes).set(src)
+      return { userEmail: row.userEmail, bytes }
+    },
+    async linkPromptFiles(promptId, fileIds) {
+      if (!fileIds.length) return
+      // One batched round-trip instead of N sequential INSERTs.
+      const stmt = db.prepare(`INSERT OR IGNORE INTO prompt_files (prompt_id, idx, file_id) VALUES (?, ?, ?)`)
+      await db.batch(fileIds.map((id, i) => stmt.bind(promptId, i, id)))
+    },
+    async listPromptAttachments(promptId) {
+      const { results } = await db
+        .prepare(
+          `SELECT a.file_id AS fileId, a.filename AS filename, a.content_type AS contentType
+             FROM prompt_files pf JOIN attachments a ON a.file_id = pf.file_id
+            WHERE pf.prompt_id = ? ORDER BY pf.idx`,
+        )
+        .bind(promptId)
+        .all<AttachmentMeta>()
+      return results
     },
   }
 }

@@ -11,7 +11,7 @@
  * (solutionId/orderKey/coreSegmentId/airline codes) live only in the agent's
  * tool args and are never surfaced here.
  */
-import type { PromptContent } from './api.ts'
+import type { Attachment, PromptContent } from './api.ts'
 
 // ── search (travelkit-pro compact JSON) ────────────────────────────────
 // The skill runs python scripts in the sandbox; the structured result we can parse
@@ -144,6 +144,9 @@ export interface ChatBubble {
    *  `cards`. The latest verify's fare is the SAME object as `DerivedView.fare`, so the panel
    *  shows the "继续预订" CTA only on that one (`b.fare === view.fare`). */
   fare?: FareVerification
+  /** Images/files the user attached to this turn — rendered above the user bubble (thumbnails /
+   *  file chips). Set only on user bubbles, only when non-empty. */
+  attachments?: Attachment[]
 }
 
 export type Stage = 'idle' | 'search' | 'verify' | 'order' | 'payment'
@@ -192,7 +195,9 @@ export function derive(prompts: PromptContent[]): DerivedView {
   let lastCardsSig = ''
 
   for (const p of prompts) {
-    chat.push({ key: `u-${p.id}`, role: 'user', text: p.prompt })
+    // Attach the key only when there are attachments, so an optimistic turn (undefined) and a
+    // reloaded one (server may send []) derive the identical user bubble (I0).
+    chat.push({ key: `u-${p.id}`, role: 'user', text: p.prompt, ...(p.attachments?.length ? { attachments: p.attachments } : {}) })
     // Hold this prompt's latest search / verify; attach to the next assistant text (stripping its
     // redundant markdown table), else flush as a standalone card bubble at prompt end.
     let pendingSearch: SearchResult | null = null
@@ -282,11 +287,11 @@ export function derive(prompts: PromptContent[]): DerivedView {
     }
   }
 
-  // de-dupe consecutive identical assistant bubbles; never drop a card-bearing bubble
+  // de-dupe consecutive identical assistant bubbles; never drop a card- or attachment-bearing bubble
   const deduped: ChatBubble[] = []
   for (const b of chat) {
     const prev = deduped[deduped.length - 1]
-    if (!b.cards && !b.fare && prev && prev.role === b.role && prev.text === b.text && prev.runUrl === b.runUrl && !prev.cards && !prev.fare) continue
+    if (!b.cards && !b.fare && !b.attachments && prev && prev.role === b.role && prev.text === b.text && prev.runUrl === b.runUrl && !prev.cards && !prev.fare && !prev.attachments) continue
     deduped.push(b)
   }
   return { chat: deduped, stage, search, fare, notice }
