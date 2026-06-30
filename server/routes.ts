@@ -180,7 +180,9 @@ app.get('/tasks/:id/content', async (c) => {
       // Metadata only — the client derives the rendition URLs (single source: api.toAttachment), so
       // the reloaded bubble matches the optimistic one (streaming-experience-contract I0).
       const attachments = await store.listPromptAttachments(p.id)
-      return { id: p.id, prompt: p.prompt, status: p.status, frames, attachments }
+      // created_at / completed_at drive the per-bubble timestamps (UTC; the client converts to
+      // local tz — see src/lib/time.ts). completed_at is null while the turn is still running.
+      return { id: p.id, prompt: p.prompt, status: p.status, created_at: p.created_at, completed_at: p.completed_at, frames, attachments }
     }),
   )
   return c.json({ task: { id: task.id, status: task.status }, prompts })

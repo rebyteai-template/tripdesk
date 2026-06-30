@@ -131,6 +131,10 @@ export interface ChatBubble {
   key: string
   role: 'user' | 'assistant'
   text: string
+  /** UTC timestamp this bubble was "sent": the prompt's created_at for the user turn, its
+   *  completed_at (falling back to created_at while running) for assistant turns. The UI converts
+   *  to the viewer's local timezone — see src/lib/time.ts. Absent on the rebyte run link. */
+  ts?: string
   /** When set, the bubble renders as a link to this turn's rebyte run. */
   runUrl?: string
   /** Turn-level failure (DO `__error` frame) — rendered in the error palette. */
@@ -195,9 +199,13 @@ export function derive(prompts: PromptContent[]): DerivedView {
   let lastCardsSig = ''
 
   for (const p of prompts) {
+    // The user turn is stamped with when it was sent; every assistant bubble in this turn is
+    // stamped with the turn's completion (created_at while it's still streaming).
+    const userTs = p.created_at
+    const replyTs = p.completed_at ?? p.created_at
     // Attach the key only when there are attachments, so an optimistic turn (undefined) and a
     // reloaded one (server may send []) derive the identical user bubble (I0).
-    chat.push({ key: `u-${p.id}`, role: 'user', text: p.prompt, ...(p.attachments?.length ? { attachments: p.attachments } : {}) })
+    chat.push({ key: `u-${p.id}`, role: 'user', text: p.prompt, ts: userTs, ...(p.attachments?.length ? { attachments: p.attachments } : {}) })
     // Hold this prompt's latest search / verify; attach to the next assistant text (stripping its
     // redundant markdown table), else flush as a standalone card bubble at prompt end.
     let pendingSearch: SearchResult | null = null
@@ -216,7 +224,7 @@ export function derive(prompts: PromptContent[]): DerivedView {
       // turn failure (timeout / relay error) — without this bubble a failed turn is
       // indistinguishable from a blank chat once the loading indicator clears
       if (typeof data.__error === 'string' && data.__error.trim()) {
-        chat.push({ key: `e-${p.id}-${f.seq}`, role: 'assistant', text: data.__error, error: true })
+        chat.push({ key: `e-${p.id}-${f.seq}`, role: 'assistant', text: data.__error, error: true, ts: replyTs })
         continue
       }
 
@@ -230,7 +238,7 @@ export function derive(prompts: PromptContent[]): DerivedView {
           const key = `a-${(data.message as Record<string, unknown>).id ?? f.seq}-${f.seq}`
           // A search / verify card attaches to this turn's prose, with the redundant markdown
           // table stripped (the card shows the same data). Both can ride one bubble.
-          const bubble: ChatBubble = { key, role: 'assistant', text }
+          const bubble: ChatBubble = { key, role: 'assistant', text, ts: replyTs }
           if (pendingSearch || pendingFare) bubble.text = stripTables(text)
           if (pendingSearch) { bubble.cards = pendingSearch.options; bubble.totalCount = pendingSearch.totalCount; pendingSearch = null }
           if (pendingFare) { bubble.fare = pendingFare; pendingFare = null }
@@ -280,10 +288,10 @@ export function derive(prompts: PromptContent[]): DerivedView {
 
     // a search / verify with no trailing summary text → standalone card bubble (keeps it visible)
     if (pendingSearch) {
-      chat.push({ key: `cards-${p.id}`, role: 'assistant', text: '', cards: pendingSearch.options, totalCount: pendingSearch.totalCount })
+      chat.push({ key: `cards-${p.id}`, role: 'assistant', text: '', cards: pendingSearch.options, totalCount: pendingSearch.totalCount, ts: replyTs })
     }
     if (pendingFare) {
-      chat.push({ key: `fare-${p.id}`, role: 'assistant', text: '', fare: pendingFare })
+      chat.push({ key: `fare-${p.id}`, role: 'assistant', text: '', fare: pendingFare, ts: replyTs })
     }
   }
 

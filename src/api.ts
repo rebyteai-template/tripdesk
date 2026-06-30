@@ -77,6 +77,12 @@ export interface PromptContent {
   id: string
   prompt: string
   status?: string
+  /** UTC send time of the user turn (SQLite `datetime('now')`, bare form — see lib/time.ts).
+   *  Optional: an optimistic turn fills it with an ISO string before the server row exists. */
+  created_at?: string
+  /** UTC completion time of the agent turn; null while the turn is still running. The assistant
+   *  bubbles take this as their "sent" time (falling back to created_at mid-stream). */
+  completed_at?: string | null
   frames: { seq: number; data: unknown }[]
   attachments?: Attachment[]
 }

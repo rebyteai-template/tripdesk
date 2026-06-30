@@ -1,10 +1,24 @@
-import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import type { ChatBubble, FareVerification } from '../frames.ts'
+import { parseTs, shortStamp, fullStamp } from '../lib/time.ts'
 import { Markdown } from './Markdown.tsx'
 import { FlightCompareCards } from './FlightCompareCards.tsx'
 import { FareDetailCard } from './FareDetailCard.tsx'
 import { FileCard } from './FileCard.tsx'
 import { Lightbox } from './Lightbox.tsx'
+
+/** Local-timezone send time shown under a bubble (HH:MM today, M月D日 HH:MM otherwise); the full
+ *  date + timezone is on hover. Renders nothing when the bubble carries no timestamp. */
+function MsgTime({ ts }: { ts?: string }) {
+  const d = parseTs(ts)
+  if (!d) return null
+  return (
+    <time className="msg-time" dateTime={d.toISOString()} title={fullStamp(d)}>
+      {shortStamp(d)}
+    </time>
+  )
+}
 
 // Cold-start quick actions. The travelkit-pro skill's only sensible entry point is
 // flight search (order/refund/PNR all need prior context), so each is a one-tap search
@@ -73,11 +87,14 @@ export function ChatPanel({
           // write-flow step is open (onContinue is undefined otherwise → the form is showing below).
           if (b.cards || b.fare) {
             return (
-              <div key={b.key} className="chat-cards">
-                {b.text.trim() ? <div className="bubble assistant"><Markdown text={b.text} /></div> : null}
-                {b.cards
-                  ? <FlightCompareCards options={b.cards} totalCount={b.totalCount} onBook={onBook} busy={busy} />
-                  : <FareDetailCard fare={b.fare!} busy={busy} onContinue={b.fare === fareLatest ? onContinue : undefined} />}
+              <div key={b.key} className="msg full">
+                <div className="chat-cards">
+                  {b.text.trim() ? <div className="bubble assistant"><Markdown text={b.text} /></div> : null}
+                  {b.cards
+                    ? <FlightCompareCards options={b.cards} totalCount={b.totalCount} onBook={onBook} busy={busy} />
+                    : <FareDetailCard fare={b.fare!} busy={busy} onContinue={b.fare === fareLatest ? onContinue : undefined} />}
+                </div>
+                <MsgTime ts={b.ts} />
               </div>
             )
           }
@@ -86,7 +103,7 @@ export function ChatPanel({
           // thumbnails (→ lightbox); non-images render the shared FileCard.
           if (b.attachments?.length) {
             return (
-              <Fragment key={b.key}>
+              <div key={b.key} className={`msg ${b.role}`}>
                 <div className={`msg-attachments ${b.role}`}>
                   {b.attachments.map((a) =>
                     a.contentType.startsWith('image/') ? (
@@ -104,12 +121,16 @@ export function ChatPanel({
                   )}
                 </div>
                 {b.text ? <div className={`bubble ${b.role}`}>{b.text}</div> : null}
-              </Fragment>
+                <MsgTime ts={b.ts} />
+              </div>
             )
           }
           return (
-            <div key={b.key} className={`bubble ${b.role}${b.error ? ' error' : ''}`}>
-              {b.role === 'assistant' && !b.error ? <Markdown text={b.text} /> : b.text}
+            <div key={b.key} className={`msg ${b.role}`}>
+              <div className={`bubble ${b.role}${b.error ? ' error' : ''}`}>
+                {b.role === 'assistant' && !b.error ? <Markdown text={b.text} /> : b.text}
+              </div>
+              <MsgTime ts={b.ts} />
             </div>
           )
         })

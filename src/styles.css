@@ -132,6 +132,15 @@ body {
 .bubble.typing { color: var(--muted); }
 .bubble.error { background: var(--err-soft); border-color: var(--err-border); color: var(--err); white-space: pre-wrap; }
 
+/* Message wrapper: stacks a bubble (or card group / attachments) over its send-time stamp,
+   aligned to the sender. The inner bubble keeps its own align-self; align-items places the time. */
+.msg { display: flex; flex-direction: column; gap: 4px; max-width: 88%; }
+.msg.user { align-self: flex-end; align-items: flex-end; }
+.msg.assistant { align-self: flex-start; align-items: flex-start; }
+.msg.full { align-self: stretch; max-width: 100%; align-items: flex-start; }  /* search / fare card turns */
+.msg .bubble { max-width: 100%; }   /* the wrapper already caps width — don't double-constrain */
+.msg-time { font-size: 11px; line-height: 1; color: var(--muted); padding: 0 4px; user-select: none; }
+
 /* assistant Markdown (.md = react-markdown output inside an assistant bubble) */
 .bubble.assistant { white-space: normal; }   /* Markdown 自己控制间距,不要 pre-wrap */
 .md > :first-child { margin-top: 0; }

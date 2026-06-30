@@ -69,7 +69,9 @@ export function useSendMessage() {
           pid = r.promptId
         }
         const ttid = tid
-        addTurn({ taskId: ttid, prompt: { id: pid, prompt: text, frames: [], attachments } })
+        // Stamp the optimistic turn so its bubble shows a time immediately (ISO → parseTs passes
+        // it through). The on-done refetch later replaces this with the server's created_at/completed_at.
+        addTurn({ taskId: ttid, prompt: { id: pid, prompt: text, frames: [], attachments, created_at: new Date().toISOString() } })
         // Open the live stream (busy + frame append + on-done refetch). Shared with the
         // reload-reattach path (useConversation) via lib/stream.ts so it's never doubled.
         attachStream(qc, ttid, pid)
