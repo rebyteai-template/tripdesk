@@ -40,6 +40,17 @@
 
 ## 2. skill 更新：已 provision 的沙箱里干净替换 skill — 已解决 ✅
 
+> **更新 2026-07-07（skills v3 落地，彻底换掉本节的 workaround）**：cctools `main` 已发
+> **skills v3**（PR #193/#194）——`POST /v1/tasks` 带 `skills:[github:…tree/main/skills/rebyte-flight]`，
+> relay 在跑 manager 前把 skill 从 GitHub `git clone` 进 workspace VM（私有 repo 用 org 绑的 GitHub
+> token，`pushAuthFilesToVM` 写 `~/.netrc`）；重装幂等替换、无残留。TripDesk 已切到此路：**不再
+> vendor/inline/逐文件上传 skill**（删了 `scripts/gen-seed-assets.ts`、`worker/seed-assets.generated.ts`、
+> `pushSeedFiles`），skill 单一真源 = repo `rebyteai-template/rebyte-flight-skill`，**改 skill = push
+> `main`**。下面手搓的 gRPC-Web `Remove` 不再用于「换 skill」，只保留给：① `writeClaudeMd` 的
+> CLAUDE.md 软链 double-Remove；② `removeStaleArtifacts` 清理存量沙箱里退役的旧 skill 目录
+> （`.claude/skills/travelkit` / `travelkit-pro`）。⚠️ skills v3 **未上 prod relay**——dev 验证接
+> dev relay + dev `rbk_` key，travelkit prod 待其上 `api.rebyte.ai` 再部署。**以下为历史记录。**
+
 **原以为的现象**：skill 搬运进沙箱 `/code/.claude/skills/...`，上游一变老沙箱拿不到新版，
 因为 envd 的 **REST 文件 API `/files` 没有 DELETE（405，`allow: GET,HEAD,POST`）**，re-seed
 只能「覆盖同名文件」，废弃的旧文件（如 MCP 时代的 reference 文档）残留。

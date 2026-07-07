@@ -7,7 +7,7 @@
  *   1. agent_instructions — the workspace's own system prompt. cctools getWorkspaceAsAgent()
  *      APPENDS it after the generic manager base prompt (AUX_TRADER_SYSTEM_PROMPT), so this is
  *      a thin domain overlay: route ALL flight work to the sandbox, never fabricate. It does NOT
- *      restate the skill flow — that lives in the sandbox /code/CLAUDE.md + travelkit-pro skill,
+ *      restate the skill flow — that lives in the sandbox /code/CLAUDE.md + rebyte-flight skill,
  *      which the delegated sub-agent reads.
  *   2. web_search view OFF — a hard capability cut. With no web_search tool the manager CANNOT
  *      web-search/fabricate flights; it must delegate. Belt-and-suspenders with the prompt.
@@ -64,14 +64,18 @@ interface AgentComputerConfig {
  * config is optional: the Worker/DO passes its env-derived {apiUrl, apiKey}; CLI scripts omit it and
  * fall back to process.env (rebyteJSON's fallbackConfig).
  */
-export async function ensureAgentConfig(computerId: string, config?: RebyteConfig): Promise<string[]> {
+export async function ensureAgentConfig(computerId: string, config?: RebyteConfig, agentInstructions?: string): Promise<string[]> {
   const cur = await rebyteJSON<AgentComputerConfig>(`/agent-computers/${computerId}`, { config })
+  // Debug override from the SPA's config panel wins; empty/undefined → the built-in Kitty default.
+  // Because this runs on every first turn (GET→diff→PATCH), a changed override auto-applies to the
+  // next new session with no extra machinery — no redeploy needed to iterate on the manager prompt.
+  const desiredInstructions = agentInstructions?.trim() || AGENT_INSTRUCTIONS
 
   const patch: { agent_instructions?: string; views?: Record<string, boolean> } = {}
   const changed: string[] = []
 
-  if (cur.agentInstructions !== AGENT_INSTRUCTIONS) {
-    patch.agent_instructions = AGENT_INSTRUCTIONS
+  if (cur.agentInstructions !== desiredInstructions) {
+    patch.agent_instructions = desiredInstructions
     changed.push('agent_instructions')
   }
   // Toggle by the view's stable id (the canonical PATCH key); find it by the tool it's backed by.

@@ -78,6 +78,15 @@ export interface Store {
    *  "new VM" action: the old VM is abandoned and this row now names the new one. */
   replaceAgentComputer(userEmail: string, acId: string, sandboxId: string | null, tokenHash: string, seedVersion: string): Promise<void>
 
+  // ── global debug config (ONE shared config for ALL users; edited via the admin debug panel) ──
+  /** The single global config (skill-ref + manager-prompt overrides) shared by every user's
+   *  sessions — NOT per-user. Read on each first turn; written only by the admin panel. Empty
+   *  string = use the built-in default (worker/skill-ref.ts SKILL_REF / agent-config.ts
+   *  AGENT_INSTRUCTIONS). Stored in the `kv` table. */
+  getConfig(): Promise<{ skillRef: string; systemPrompt: string }>
+  /** Upsert the global config — only the provided fields are written. Admin-gated at the route. */
+  setConfig(patch: { skillRef?: string; systemPrompt?: string }): Promise<void>
+
   createPrompt(id: string, taskId: string, prompt: string): Promise<void>
   getPrompt(id: string): Promise<Prompt | undefined>
   listPrompts(taskId: string): Promise<Prompt[]>

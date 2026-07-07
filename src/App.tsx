@@ -12,7 +12,7 @@ import { useCredit } from './hooks/useCredit.ts'
 import { useSessions } from './hooks/useSessions.ts'
 import { useConversation } from './hooks/useConversation.ts'
 import { useSendMessage } from './hooks/useSendMessage.ts'
-import { useNewSandbox } from './hooks/useNewSandbox.ts'
+import { DebugConfigPanel } from './components/DebugConfigPanel.tsx'
 import { busyTasksAtom } from './store/conversation.ts'
 import {
   taskIdAtom,
@@ -34,7 +34,6 @@ export function App() {
   const { data: credit } = useCredit(!me.isError)
   const { view, busy } = useConversation()
   const send = useSendMessage()
-  const newVm = useNewSandbox()
 
   const taskId = useAtomValue(taskIdAtom)
   const busyTasks = useAtomValue(busyTasksAtom)
@@ -78,14 +77,6 @@ export function App() {
     setMode('passengers')
   }
 
-  const vmLabel = newVm.isPending
-    ? '🔧 新建中…'
-    : newVm.isError
-      ? '🔧 ❌ 失败'
-      : newVm.isSuccess
-        ? `🔧 ✅ ${newVm.data?.sandboxId ? newVm.data.sandboxId.slice(0, 8) : '已就绪'}`
-        : '🔧 新 VM'
-
   // Single-column chat stream: search cards, verify card, and the write-flow (passenger form /
   // confirm gate) all render inline. The verify card's entry CTA is offered only while no write-flow
   // step is open (mode === 'auto'); ChatPanel further limits it to the latest fare card.
@@ -117,20 +108,7 @@ export function App() {
           theme={theme}
           onToggleTheme={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
           onTapBrand={tapBrand}
-        >
-          {/* Hidden debug control (revealed by 10× brand tap) — kept in App so the
-              sandbox-VM plumbing stays out of the presentational sidebar. */}
-          {debugOn && (
-            <button
-              className="sidebar-vm"
-              onClick={() => newVm.mutate()}
-              disabled={newVm.isPending}
-              title="调试：为当前用户新建一个沙箱 VM（旧的弃用）"
-            >
-              {vmLabel}
-            </button>
-          )}
-        </Sidebar>
+        />
         <main className="main">
           <ChatPanel
             chat={view.chat}
@@ -154,6 +132,9 @@ export function App() {
           </ChatPanel>
           <Composer onSend={send} busy={busy} ref={composerRef} />
         </main>
+        {/* Right-side debug config panel (revealed by the 10× brand tap): skill-URL override +
+            "new VM" for the current account. Hidden for end users. */}
+        {debugOn && <DebugConfigPanel />}
       </div>
     </div>
   )

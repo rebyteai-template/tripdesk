@@ -9,6 +9,7 @@ export const queryKeys = {
   credit: () => ['credit'] as const,
   sessions: () => ['sessions'] as const,
   taskContent: (taskId: string) => ['taskContent', taskId] as const,
+  debugConfig: () => ['debugConfig'] as const,
 }
 
 /** Enable conditions for queries whose params may be absent. */

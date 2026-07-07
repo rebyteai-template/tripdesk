@@ -16,6 +16,7 @@
  */
 import { ensureDefaultAgentComputer } from './provision.ts'
 import { seedTravelkit } from './seed.ts'
+import { SKILL_REF } from '../../worker/skill-ref.ts'
 import { rebyteJSON, rebyteFetch } from './client.ts'
 import { parseSSE, isObj } from './sse.ts'
 
@@ -126,7 +127,7 @@ async function main() {
   console.log('[multiturn] 1/3 ensure VM…')
   const ac = await ensureDefaultAgentComputer()
   console.log(`[multiturn]     VM=${ac.id}`)
-  console.log('[multiturn] 2/3 seed travelkit…')
+  console.log('[multiturn] 2/3 seed cred+prompt (skill installs via skills v3 on turn 1)…')
   await seedTravelkit(ac).then((f) => console.log(`[multiturn]     seeded ${f.length} files`))
 
   // search → verify → collect passenger/confirm gate → confirm-create-order + pay link.
@@ -145,7 +146,8 @@ async function main() {
   console.log('[multiturn] 3/3 turn 1: POST /tasks (model resolved org-wide by relay)')
   const task = await rebyteJSON<{ id: string; status?: string }>('/tasks', {
     method: 'POST',
-    body: JSON.stringify({ prompt: turns[0], workspaceId: ac.id }),
+    // skills → relay installs rebyte-flight from GitHub into the VM before the manager runs (turn 1 only).
+    body: JSON.stringify({ prompt: turns[0], workspaceId: ac.id, skills: [SKILL_REF] }),
   })
   console.log(`[multiturn]     relayTask=${task.id}`)
 
@@ -169,7 +171,7 @@ async function main() {
     // Skill-routing guard: the manager MUST delegate flight work to the sandbox, never web-search /
     // fabricate. A web_search tool on any turn means the routing hint failed (REBYTE-NEEDS.md §3).
     if (r.tools.some((t) => /web_search|websearch|browse/i.test(t))) {
-      failures.push(`turn ${i + 1}: 用了 web search（${r.tools.join(',')}）——没走 travelkit-pro skill`)
+      failures.push(`turn ${i + 1}: 用了 web search（${r.tools.join(',')}）——没走 rebyte-flight skill`)
     }
     console.log(failures.find((f) => f.startsWith(`turn ${i + 1}:`)) ? `❌ turn ${i + 1} FAIL` : `✅ turn ${i + 1} OK`)
   }

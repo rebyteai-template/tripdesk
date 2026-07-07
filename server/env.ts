@@ -6,12 +6,9 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 export const env = {
-  /** Root for per-session project working dirs (holds the travelkit-pro skill the
-   *  seed scripts upload to a sandbox). */
+  /** Cache dir for the CLI probes' provisioned agent-computer rows (rebyte-project.json /
+   *  agent-computers/), so re-runs reuse a VM instead of provisioning a fresh one. */
   DATA_DIR: process.env.TRIPDESK_DATA_DIR || join(homedir(), '.tripdesk'),
-
-  /** Repo root — source of the travelkit-pro skill the seed scripts read. */
-  REPO_ROOT: process.cwd(),
 
   /** Rebyte relay base. The relay runs tasks + streams stream-json events. */
   REBYTE_API_URL: process.env.REBYTE_API_URL ?? 'https://api.rebyte.ai/v1',

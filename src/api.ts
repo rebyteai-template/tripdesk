@@ -152,6 +152,22 @@ export const followup = (taskId: string, prompt: string, files?: FileRef[]): Pro
  *  for the VM to boot. Hidden behind the sidebar-brand 10-click easter egg in App.tsx. */
 export const newSandbox = (): Promise<{ sandboxId?: string }> => postJson('/debug/new-sandbox', {})
 
+/** The GLOBAL debug config (skill ref + manager prompt) shared by EVERY user — not per-browser.
+ *  `defaults` are the built-in fallbacks (shown as placeholders; an empty field = use the default).
+ *  `isAdmin` says whether THIS caller may save (uid ∈ ADMIN_UIDS). */
+export interface DebugConfig {
+  skillRef: string
+  systemPrompt: string
+  defaults: { skillRef: string; systemPrompt: string }
+  isAdmin: boolean
+}
+/** Read the global debug config (any authenticated caller). */
+export const getDebugConfig = (): Promise<DebugConfig> => json('/debug/config')
+/** Write the global debug config (admin only → 403 otherwise). Empty string reverts that field to the
+ *  built-in default. The panel re-fetches on success (invalidateQueries), so this just acks. */
+export const saveDebugConfig = (patch: { skillRef: string; systemPrompt: string }): Promise<{ ok: boolean }> =>
+  postJson('/debug/config', patch)
+
 export async function loadContent(
   taskId: string,
 ): Promise<{ task: { id: string; status: string }; prompts: PromptContent[] } | null> {

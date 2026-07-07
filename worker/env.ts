@@ -27,4 +27,9 @@ export interface Env {
   CF_ACCESS_AUD?: string
   /** Local-dev only (.dev.vars): bypass Access and act as this email. Never set in prod. */
   DEV_EMAIL?: string
+  /** Comma-separated uids allowed to WRITE the global debug config (skill ref + manager prompt),
+   *  which affects ALL users. TESTING PHASE: UNSET → OPEN — anyone who reveals the debug panel (10×
+   *  brand tap) can save. Set it (secret: `wrangler secret put ADMIN_UIDS`, or a `.dev.vars` line) to
+   *  your own handoff `uid`(s) to lock writes down to just those. */
+  ADMIN_UIDS?: string
 }

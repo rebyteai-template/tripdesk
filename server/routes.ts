@@ -20,6 +20,10 @@ import type { Store, Task } from './store.ts'
 import { MAX_UPLOAD_BYTES, attachmentPromptSuffix } from './attachments.ts'
 import type { FileRef } from './rebyte/client.ts'
 import { framesHaveAssistantText, unrenderedResultTexts } from './frame-text.ts'
+// Built-in defaults surfaced to the debug panel (placeholder / "填入默认") and used as the fallback
+// when the global config field is empty. Single source of truth stays in these two modules.
+import { SKILL_REF as DEFAULT_SKILL_REF } from '../worker/skill-ref.ts'
+import { AGENT_INSTRUCTIONS as DEFAULT_SYSTEM_PROMPT } from './rebyte/agent-config.ts'
 
 /** Single default project (no project picker in this build). */
 export const DEFAULT_PROJECT_ID = 'default'
@@ -43,6 +47,9 @@ export interface RouteVars {
   /** The org's total available rebyte credit (org-wide, behind the Worker's relay key), or
    *  null if the relay couldn't be reached. See GET /credit. */
   getCredit: () => Promise<number | null>
+  /** Is this caller allowed to WRITE the global debug config? (uid ∈ ADMIN_UIDS.) Everyone can read
+   *  it; only admins can save, since it applies to ALL users. See POST /debug/config. */
+  isAdmin: boolean
 }
 
 /** Below this, the UI nags the org to top up. Credits run in the thousands (a turn burns a
@@ -92,6 +99,8 @@ app.get('/tasks', async (c) => {
 
 app.post('/tasks', async (c) => {
   const { store, runTurn, userEmail } = c.var
+  // The skill ref + manager prompt are NOT taken from the request — they're the GLOBAL config the
+  // worker reads server-side (so every OP gets the same, not just whoever edited it). See task-do.ts.
   const turn = turnPrompts(await c.req.json<{ prompt?: string; files?: FileRef[] }>())
   if (!turn) return c.json({ error: 'prompt is required' }, 400)
 
@@ -227,6 +236,29 @@ app.get('/prompts/:id/stream', async (c) => {
 // in the normal UI. The old VM is abandoned; the new one is used on the caller's next session.
 app.post('/debug/new-sandbox', async (c) => {
   return c.json(await c.var.newSandbox())
+})
+
+// ── global debug config: ONE shared skill-ref + manager-prompt, edited by the admin, applied to
+//    EVERY user's sessions (the worker reads it server-side at task creation — see task-do.ts). ──
+app.get('/debug/config', async (c) => {
+  const cfg = await c.var.store.getConfig()
+  return c.json({
+    skillRef: cfg.skillRef,
+    systemPrompt: cfg.systemPrompt,
+    // Built-in defaults, for the panel's placeholder / "填入默认" (empty field → these apply).
+    defaults: { skillRef: DEFAULT_SKILL_REF, systemPrompt: DEFAULT_SYSTEM_PROMPT },
+    isAdmin: c.var.isAdmin, // panel disables saving for non-admins
+  })
+})
+
+// Write the GLOBAL config — admin only (it affects every user). Empty string = revert that field to
+// the built-in default. Both fields are optional; only provided ones are written.
+app.post('/debug/config', async (c) => {
+  if (!c.var.isAdmin) return c.json({ error: 'forbidden — not an admin uid (ADMIN_UIDS)' }, 403)
+  const body = await c.req.json<{ skillRef?: string; systemPrompt?: string }>()
+  await c.var.store.setConfig({ skillRef: body.skillRef, systemPrompt: body.systemPrompt })
+  // No read-back: the client re-fetches via invalidateQueries (useSaveDebugConfig) and ignores this body.
+  return c.json({ ok: true })
 })
 
 app.post('/prompts/:id/cancel', async (c) => {

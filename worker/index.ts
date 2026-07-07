@@ -53,6 +53,12 @@ app.use('/api/app/*', async (c, next) => {
   const store = createD1Store(env.DB)
   c.set('userEmail', tenant)
   c.set('store', store)
+  // Who may WRITE the global config (skill ref + manager prompt affect ALL users). TESTING PHASE: if
+  // no ADMIN_UIDS allowlist is set, anyone who can reveal the debug panel (10× brand tap) may save —
+  // the tap is the only gate. Set ADMIN_UIDS later to restrict writes to those uids (local dev's
+  // DEV_EMAIL still counts). Either way the panel is behind the same embed-key + tenant auth.
+  const adminUids = (env.ADMIN_UIDS ?? '').split(',').map((s) => s.trim()).filter(Boolean)
+  c.set('isAdmin', adminUids.length === 0 || adminUids.includes(uid) || (!!env.DEV_EMAIL && uid === env.DEV_EMAIL))
   c.set('runTurn', async (taskId, _projectId, promptId, prompt, opts) => {
     await env.TASK_DO.getByName(taskId).runTurn(taskId, promptId, prompt, tenant, token, opts?.files)
   })

@@ -55,7 +55,10 @@ const rawThemeStorage = {
 }
 export const themeAtom = atomWithStorage<'light' | 'dark'>('tripdesk-theme', 'light', rawThemeStorage)
 
-/** Hidden debug mode (revealed by tapping the brand 10×) — gates the "new VM" control. */
+/** Hidden debug mode (revealed by tapping the brand 10×) — gates the right-side debug config panel
+ *  (global skill-ref + manager-prompt config, and "new VM"). Session-only: a reload hides it again
+ *  until the next 10-tap. The config it edits is GLOBAL and server-stored (not this atom) — see
+ *  hooks/useDebugConfig.ts. */
 export const debugAtom = atom(false)
 
 // A brand-new session has no taskId yet, so its first send is "busy" only via this

@@ -28,7 +28,8 @@ import { createD1Store } from '../server/db.ts'
 import type { Store } from '../server/store.ts'
 import { isObj, parseSSE } from '../server/rebyte/sse.ts'
 import { rebyteJSON, rebyteFetch, RebyteError, type RebyteConfig, type FileRef } from '../server/rebyte/client.ts'
-import { provisionComputer, seedSandbox, pushSeedFiles, removeStaleArtifacts, applyCredential, SEED_VERSION, type ProvisionedComputer } from './seed.ts'
+import { provisionComputer, seedSandbox, writeClaudeMd, removeStaleArtifacts, applyCredential, SEED_VERSION, type ProvisionedComputer } from './seed.ts'
+import { SKILL_REF } from './skill-ref.ts'
 import { ensureAgentConfig } from '../server/rebyte/agent-config.ts'
 import { shouldDrainTerminal, shouldRetryWindowError, turnExpired, TERMINAL_STATUSES } from './turn-finalize.ts'
 import { framesHaveAssistantText, unrenderedResultTexts, normText } from '../server/frame-text.ts'
@@ -227,15 +228,17 @@ export class TaskDO extends DurableObject<Env> {
    *  travelkit into it (both pure fetch), persists it, and returns it. Concurrent first
    *  turns race on INSERT OR IGNORE — the loser's VM is orphaned (minor), both then use the
    *  winner's row. */
-  private async agentComputerFor(email: string, travelkitToken: string): Promise<CachedAgentComputer> {
+  private async agentComputerFor(email: string, travelkitToken: string, systemPrompt?: string): Promise<CachedAgentComputer> {
     const tokenHash = travelkitToken ? await sha256Hex(travelkitToken) : ''
     const existing = await this.store.getAgentComputer(email)
     let result: CachedAgentComputer
     if (existing?.id) {
       // Hot-refresh of a reused sandbox (same VM, no reprovision), best-effort — a write failure
       // just leaves the old state, surfacing as an auth/skill error:
-      //  · seed stale — a deploy changed the skill tree (SEED_VERSION bump); re-push SEED_FILES so
-      //    the user stops running the old skill. Also refreshes the credential when we have a token.
+      //  · seed stale — a deploy bumped SEED_VERSION (VM system prompt / credential format / stale
+      //    cleanup changed); re-write /code/CLAUDE.md + purge the retired skill tree. The skill itself
+      //    is refreshed by the relay (skills v3 re-clone), not here. Also refreshes the credential
+      //    when we have a token.
       //  · token rotated — the user re-logged-in with a new token; rewrite just the credential.
       const seedStale = existing.seedVersion !== SEED_VERSION
       const tokenChanged = !!travelkitToken && tokenHash !== existing.tokenHash
@@ -245,8 +248,8 @@ export class TaskDO extends DurableObject<Env> {
           if (ac.sandboxId && ac.sandboxBaseUrl && ac.sandboxApiKey) {
             if (seedStale) {
               if (travelkitToken) await seedSandbox(ac, travelkitToken)
-              else await pushSeedFiles(ac) // no token at hand → refresh files only, keep credential
-              await removeStaleArtifacts(ac) // really delete legacy files (old skill tree, .mcp.json, settings.json) via envd gRPC Remove
+              else await writeClaudeMd(ac) // no token at hand → refresh the VM system prompt only, keep credential
+              await removeStaleArtifacts(ac) // really delete legacy files (retired skill tree, .mcp.json, settings.json) via envd gRPC Remove
               await this.store.setAgentComputerSeed(email, travelkitToken ? tokenHash : (existing.tokenHash ?? ''), SEED_VERSION)
             } else {
               await applyCredential(ac, travelkitToken)
@@ -273,7 +276,7 @@ export class TaskDO extends DurableObject<Env> {
     // drift) and best-effort: on failure the manager falls back to its generic base prompt (soft
     // degradation), so we log and continue rather than failing the turn.
     try {
-      const changed = await ensureAgentConfig(result.id, this.rebyteConfig())
+      const changed = await ensureAgentConfig(result.id, this.rebyteConfig(), systemPrompt)
       if (changed.length) console.log(`[task-do] manager config → ${result.id}: ${changed.join(', ')}`)
     } catch (e) { console.log(`[task-do] ensureAgentConfig failed (non-fatal): ${(e as Error).message}`) }
     return result
@@ -413,14 +416,23 @@ export class TaskDO extends DurableObject<Env> {
           // OFF) so the front-line agent-loop delegates flight work to the sandbox instead of
           // web-searching/fabricating — no per-prompt routing line needed (REBYTE-NEEDS.md §3). The
           // booking red-lines, credential handling and skill workflow live in the VM system prompt
-          // (/code/CLAUDE.md, seeded by seed.ts) + the travelkit-pro skill, which the delegated
+          // (/code/CLAUDE.md, seeded by seed.ts) + the rebyte-flight skill, which the delegated
           // sandbox agent reads. So we POST the user's prompt verbatim.
-          const ac = await this.agentComputerFor(t.userEmail, t.travelkitToken)
+          //
+          // The GLOBAL debug config (one shared skill-ref + manager prompt, edited by the admin,
+          // applied to EVERY user) is read server-side here — NOT taken from the request — so all OPs
+          // get the same. Empty field → the built-in default (SKILL_REF / AGENT_INSTRUCTIONS).
+          //   · manager prompt → agentComputerFor → ensureAgentConfig (PATCH agent_instructions).
+          //   · skill ref → `skills:[…]` on this first-turn create: the relay (skills v3) git-clones it
+          //     into the workspace VM (ac.id = the SAME VM we seeded). Follow-ups omit skills → one
+          //     clone per session; a new session re-clones latest.
+          const cfg = await this.store.getConfig()
+          const ac = await this.agentComputerFor(t.userEmail, t.travelkitToken, cfg.systemPrompt)
           const task = await rebyteJSON<{ id: string }>('/tasks', {
             method: 'POST',
             // `files` (if any) ride here so the relay stages them into the sandbox /code/<filename>
             // before the first turn runs; the wire prompt's attachment suffix points the manager at them.
-            body: JSON.stringify({ prompt: t.prompt, workspaceId: ac.id, ...(t.files?.length ? { files: t.files } : {}) }),
+            body: JSON.stringify({ prompt: t.prompt, workspaceId: ac.id, skills: [cfg.skillRef.trim() || SKILL_REF], ...(t.files?.length ? { files: t.files } : {}) }),
             config,
           })
           relayTaskId = task.id

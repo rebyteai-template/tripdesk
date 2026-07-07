@@ -10,7 +10,7 @@ TripDesk 不是"一个订票应用"——它和姊妹项目 **adits**（`../adit
 
 ```bash
 pnpm dev          # vite(4000) + wrangler dev(8787, 本地 Worker+D1+DO)，前端 /api/app/* 代理到 8787
-pnpm typecheck    # tsc --noEmit（predeploy/pretypecheck 会先 gen:seed）
+pnpm typecheck    # tsc --noEmit
 pnpm build        # vite build → build/（wrangler deploy 上传的就是这个）
 ```
 
