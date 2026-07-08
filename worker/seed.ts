@@ -34,10 +34,10 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
  *  (just the base URL), so it's hardcoded here per deployment. ap-east-1 region. */
 const SIMPLIFLY_BASE_URL = 'https://api-ap-east-1.simplifly.tech'
 
-/** The per-user Simplifly credential as a standard dotenv file (`/code/.simplifly.env`). The
- *  simplifly-flyai-skill skill reads this file DIRECTLY — it searches from CWD upward for the nearest
- *  `.simplifly.env` and parses it as dotenv (see the skill's api-map.md); it does NOT rely on shell
- *  env vars. So this is the single source of the credential — no `.claude/settings.json` mirror, no
+/** The per-user Simplifly credential as a standard dotenv file (written to `~/.simplifly.env`; see
+ *  applyCredential for why home not /code). The simplifly-flyai-skill skill reads it DIRECTLY — it
+ *  searches from CWD upward for the nearest `.simplifly.env`, then a fixed `$HOME/.simplifly.env`
+ *  fallback; it does NOT rely on shell env vars. So this is the single source of the credential — no `.claude/settings.json` mirror, no
  *  `source` step. Plain `KEY=value` (no `export ` prefix — not every dotenv parser strips it). The
  *  token is a JWT (no quotes/newlines), so values need no quoting. This + applyCredential are the
  *  single chokepoint for "where the token lives". */
@@ -66,13 +66,15 @@ export async function provisionComputer(config: RebyteConfig, name: string): Pro
   throw new Error(`agent-computer ${created.id} 80s 内未就绪`)
 }
 
-/** Write one file into the sandbox /code via the envd file API (multipart POST; nested paths
- *  auto-create dirs). */
+/** Write one file into the sandbox via the envd file API (multipart POST; nested paths auto-create
+ *  dirs). `rel` is taken under /code unless it's already absolute (starts with '/') — e.g. a home
+ *  path like /home/user/.simplifly.env. */
 async function writeFile(ac: ProvisionedComputer, rel: string, content: string): Promise<void> {
   const host = `https://49983-${ac.sandboxId}.${new URL(ac.sandboxBaseUrl).host}` // e.g. prod.rebyte.app
+  const abs = rel.startsWith('/') ? rel : '/code/' + rel
   const fd = new FormData()
-  fd.append('file', new Blob([content]), rel.split('/').pop() ?? 'file')
-  const res = await fetch(`${host}/files?path=${encodeURIComponent('/code/' + rel)}&username=user`, {
+  fd.append('file', new Blob([content]), abs.split('/').pop() ?? 'file')
+  const res = await fetch(`${host}/files?path=${encodeURIComponent(abs)}&username=user`, {
     method: 'POST',
     headers: { 'X-API-KEY': ac.sandboxApiKey },
     body: fd,
@@ -127,6 +129,9 @@ export async function writeClaudeMd(ac: ProvisionedComputer): Promise<void> {
  *     server Claude Code would otherwise try to load.
  *   · `.claude/settings.json` — legacy per-user credential mirror; no longer written (the skill
  *     reads `.simplifly.env` directly), so the old copy must be purged to not leave a stale token.
+ *   · `.simplifly.env` — the credential MOVED to ~/.simplifly.env (applyCredential). The old
+ *     /code copy must be purged, else the skill's cwd-upward search (from a /code-based cwd) finds it
+ *     FIRST and shadows the fresh home copy — using a stale token after a rotation.
  *   · `.claude/skills/travelkit` + `.claude/skills/travelkit-pro` — retired vendored skill DIRs. The
  *     skill is now `simplifly-flyai-skill`, installed by the relay (skills v3) into
  *     `~/.claude/skills/simplifly-flyai-skill` — a DIFFERENT path, so without deletion the old vendored
@@ -136,6 +141,7 @@ export async function writeClaudeMd(ac: ProvisionedComputer): Promise<void> {
 const STALE_FILES: string[] = [
   '.mcp.json',
   '.claude/settings.json',
+  '.simplifly.env', // credential relocated to ~/.simplifly.env — purge the old /code copy (would shadow it)
   '.claude/skills/travelkit', // recursive: whole old (gen-1) skill subtree
   '.claude/skills/travelkit-pro', // recursive: retired vendored skill (now simplifly-flyai-skill via skills v3)
 ]
@@ -205,8 +211,13 @@ export async function removeStaleArtifacts(ac: ProvisionedComputer): Promise<voi
 
 /** Write the per-user Simplifly credential into an already-provisioned sandbox — used at seed time
  *  and when the user's token rotates (re-login), refreshing in place instead of rebuilding the VM.
- *  Writes the single sink `.simplifly.env` (the dotenv file the simplifly-flyai-skill skill reads directly).
- *  Single chokepoint for "where the token lives"; see credentialsEnv(). */
+ *  Single chokepoint for "where the token lives"; see credentialsEnv().
+ *
+ *  Writes `~/.simplifly.env` (home), NOT /code: /code and /home/user are siblings, and the sandbox
+ *  agent's cwd isn't reliably under /code, so a /code-only file is invisible to the skill's cwd-upward
+ *  search when it runs from a home-based cwd. The skill's findEnvFile also checks $HOME as a fixed
+ *  fallback, so a single home copy is found from ANY cwd. (STALE_FILES purges the old /code copy so
+ *  it can't shadow this one.) REQUIRES the skill's $HOME fallback to be live — push the skill first. */
 export async function applyCredential(ac: ProvisionedComputer, travelkitToken: string): Promise<void> {
-  await writeFile(ac, '.simplifly.env', credentialsEnv(travelkitToken))
+  await writeFile(ac, '/home/user/.simplifly.env', credentialsEnv(travelkitToken))
 }
