@@ -3,8 +3,8 @@ import type { ReactNode } from 'react'
 import type { ChatBubble, FareVerification } from '../frames.ts'
 import { parseTs, shortStamp, fullStamp } from '../lib/time.ts'
 import { Markdown } from './Markdown.tsx'
-import { FlightCompareCards } from './FlightCompareCards.tsx'
-import { FareDetailCard } from './FareDetailCard.tsx'
+import { FlightResultsTable } from './FlightResultsTable.tsx'
+import { FareDetailTable } from './FareDetailTable.tsx'
 import { FileCard } from './FileCard.tsx'
 import { Lightbox } from './Lightbox.tsx'
 
@@ -91,8 +91,8 @@ export function ChatPanel({
                 <div className="chat-cards">
                   {b.text.trim() ? <div className="bubble assistant"><Markdown text={b.text} /></div> : null}
                   {b.cards
-                    ? <FlightCompareCards options={b.cards} totalCount={b.totalCount} onBook={onBook} busy={busy} />
-                    : <FareDetailCard fare={b.fare!} busy={busy} onContinue={b.fare === fareLatest ? onContinue : undefined} />}
+                    ? <FlightResultsTable options={b.cards} totalCount={b.totalCount} onBook={onBook} busy={busy} />
+                    : <FareDetailTable fare={b.fare!} busy={busy} onContinue={b.fare === fareLatest ? onContinue : undefined} />}
                 </div>
                 <MsgTime ts={b.ts} />
               </div>

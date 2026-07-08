@@ -22,16 +22,18 @@ import type { Attachment, PromptContent } from './api.ts'
 // filtering/refinement ("拉扯") happens conversationally in chat.
 export interface CompactSegment {
   flightNo: string
+  opFlightNo?: string
   departure: string        // IATA code
-  departureName: string    // e.g. "北京大兴(PKX)"
+  departureName?: string   // e.g. "北京大兴"
   departureTerminal?: string
   departureDate: string
   departureTime: string
   arrival: string
-  arrivalName: string
+  arrivalName?: string
   arrivalTerminal?: string
   arrivalDate: string
   arrivalTime: string
+  flightTime?: string
   cabin: string            // already display form, e.g. "经济舱 T舱"
   checkedBaggage?: string  // e.g. "1件，20kg/件"
 }
@@ -42,8 +44,10 @@ export interface CompactJourney {
   departureTime: string
   arrivalDate: string
   arrivalTime: string
+  arrivalCrossDays?: number
   duration: string
   transferCount: number
+  layovers?: string[]
   segments: CompactSegment[]
 }
 export interface CompactOption {
@@ -55,7 +59,15 @@ export interface CompactOption {
   cabin: string
   baggage?: string
   hasCheckedBaggage: boolean
-  price: { amount: number; currency: string; display: string }
+  price: {
+    amount: number
+    currency: string
+    display: string
+    perType?: Record<string, { num?: number; unitTotal?: number; subtotal?: number }>
+  }
+  source?: string
+  sourceDisplay?: string
+  copyText?: string
   journeys: CompactJourney[]
 }
 export interface SearchResult {
@@ -73,9 +85,14 @@ export interface SearchResult {
 export interface FareLeg {
   flightNo: string
   departure: string
+  departureDate?: string
+  departureTime?: string
   arrival: string
+  arrivalDate?: string
+  arrivalTime?: string
   cabinClass: string
   cabinCode?: string
+  checkedBaggage?: string
   availability?: number
 }
 export interface FareJourney {
@@ -179,6 +196,20 @@ function textFromContent(content: unknown): string {
 
 const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
 const str = (v: unknown): string => (typeof v === 'string' ? v : '')
+
+function parseCompactPricePerType(raw: unknown): CompactOption['price']['perType'] | undefined {
+  if (!isObj(raw)) return undefined
+  const perType: NonNullable<CompactOption['price']['perType']> = {}
+  for (const [passengerType, value] of Object.entries(raw)) {
+    if (!isObj(value)) continue
+    const line: NonNullable<CompactOption['price']['perType']>[string] = {}
+    if (typeof value.num === 'number' && Number.isFinite(value.num)) line.num = num(value.num)
+    if (typeof value.unitTotal === 'number' && Number.isFinite(value.unitTotal)) line.unitTotal = num(value.unitTotal)
+    if (typeof value.subtotal === 'number' && Number.isFinite(value.subtotal)) line.subtotal = num(value.subtotal)
+    perType[passengerType] = line
+  }
+  return Object.keys(perType).length ? perType : undefined
+}
 
 /** Remove markdown table blocks from assistant text when the same options render as inline
  *  cards — avoids showing the data twice. Deterministic, no agent cooperation: drop lines
@@ -344,16 +375,18 @@ function toCompactOption(raw: unknown): CompactOption | null {
       if (!isObj(s)) continue
       segments.push({
         flightNo: str(s.flightNo),
+        opFlightNo: str(s.opFlightNo) || undefined,
         departure: str(s.departure),
-        departureName: str(s.departureName) || str(s.departure),
+        departureName: str(s.departureName) || undefined,
         departureTerminal: str(s.departureTerminal) || undefined,
         departureDate: str(s.departureDate),
         departureTime: str(s.departureTime),
         arrival: str(s.arrival),
-        arrivalName: str(s.arrivalName) || str(s.arrival),
+        arrivalName: str(s.arrivalName) || undefined,
         arrivalTerminal: str(s.arrivalTerminal) || undefined,
         arrivalDate: str(s.arrivalDate),
         arrivalTime: str(s.arrivalTime),
+        flightTime: str(s.flightTime) || undefined,
         cabin: str(s.cabin),
         checkedBaggage: str(s.checkedBaggage) || undefined,
       })
@@ -366,8 +399,10 @@ function toCompactOption(raw: unknown): CompactOption | null {
       departureTime: str(j.departureTime),
       arrivalDate: str(j.arrivalDate),
       arrivalTime: str(j.arrivalTime),
+      arrivalCrossDays: num(j.arrivalCrossDays) || undefined,
       duration: str(j.duration),
       transferCount: num(j.transferCount),
+      layovers: Array.isArray(j.layovers) ? j.layovers.map(str).filter(Boolean) : undefined,
       segments,
     })
   }
@@ -376,6 +411,7 @@ function toCompactOption(raw: unknown): CompactOption | null {
   const firstTransfer = journeys[0]?.transferCount ?? 0
   const price = isObj(raw.price) ? raw.price : {}
   const amount = num(price.amount)
+  const perType = parseCompactPricePerType(price.perType)
   return {
     optionNumber,
     section: str(raw.section) || undefined,
@@ -385,7 +421,10 @@ function toCompactOption(raw: unknown): CompactOption | null {
     cabin: str(raw.cabin),
     baggage: str(raw.baggage) || undefined,
     hasCheckedBaggage: raw.hasCheckedBaggage === true,
-    price: { amount, currency: str(price.currency) || 'CNY', display: str(price.display) || `¥${amount}` },
+    price: { amount, currency: str(price.currency) || 'CNY', display: str(price.display) || `¥${amount}`, perType },
+    source: str(raw.source) || undefined,
+    sourceDisplay: str(raw.sourceDisplay) || undefined,
+    copyText: str(raw.copyText) || undefined,
     journeys,
   }
 }
@@ -405,9 +444,18 @@ function parseCompactVerify(json: Record<string, unknown>): FareVerification | n
     const legs: FareLeg[] = []
     for (const s of Array.isArray(j.segments) ? j.segments : []) {
       if (!isObj(s)) continue
-      // compact `cabin` is already a display string ("经济舱 T舱"); carry it as cabinClass so
-      // cabinLabel() falls through to it unchanged (there is no separate cabinCode to split here).
-      legs.push({ flightNo: str(s.flightNo), departure: str(s.departure), arrival: str(s.arrival), cabinClass: str(s.cabin) })
+      // compact `cabin` is already a display string ("经济舱 T舱"); carry it as cabinClass.
+      legs.push({
+        flightNo: str(s.flightNo),
+        departure: str(s.departure),
+        departureDate: str(s.departureDate) || undefined,
+        departureTime: str(s.departureTime) || undefined,
+        arrival: str(s.arrival),
+        arrivalDate: str(s.arrivalDate) || undefined,
+        arrivalTime: str(s.arrivalTime) || undefined,
+        cabinClass: str(s.cabin),
+        checkedBaggage: str(s.checkedBaggage) || undefined,
+      })
     }
     if (!legs.length) continue
     journeys.push({
