@@ -6,7 +6,7 @@
  *   /code/CLAUDE.md        — the VM system prompt (forces flight work through the skill)
  *
  * The SKILL itself is NOT seeded here anymore: the relay installs `rebyte-flight` from GitHub
- * (cctools skills v3) when a task is created with `skills: [SKILL_REF]` — the probes pass it on their
+ * (cctools skills v3) when a task is created with `skills: [toSkillRef(SKILL_REF)]` — the probes pass it on their
  * POST /tasks. The rebyte-flight skill reads .simplifly.env directly (not shell env vars). Keep the
  * credential format in sync with worker/seed.ts credentialsEnv().
  */

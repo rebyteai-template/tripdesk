@@ -29,7 +29,7 @@ import type { Store } from '../server/store.ts'
 import { isObj, parseSSE } from '../server/rebyte/sse.ts'
 import { rebyteJSON, rebyteFetch, RebyteError, type RebyteConfig, type FileRef } from '../server/rebyte/client.ts'
 import { provisionComputer, seedSandbox, writeClaudeMd, removeStaleArtifacts, applyCredential, SEED_VERSION, type ProvisionedComputer } from './seed.ts'
-import { SKILL_REF } from './skill-ref.ts'
+import { SKILL_REF, toSkillRef } from './skill-ref.ts'
 import { ensureAgentConfig } from '../server/rebyte/agent-config.ts'
 import { shouldDrainTerminal, shouldRetryWindowError, turnExpired, TERMINAL_STATUSES } from './turn-finalize.ts'
 import { framesHaveAssistantText, unrenderedResultTexts, normText } from '../server/frame-text.ts'
@@ -432,7 +432,7 @@ export class TaskDO extends DurableObject<Env> {
             method: 'POST',
             // `files` (if any) ride here so the relay stages them into the sandbox /code/<filename>
             // before the first turn runs; the wire prompt's attachment suffix points the manager at them.
-            body: JSON.stringify({ prompt: t.prompt, workspaceId: ac.id, skills: [cfg.skillRef.trim() || SKILL_REF], ...(t.files?.length ? { files: t.files } : {}) }),
+            body: JSON.stringify({ prompt: t.prompt, workspaceId: ac.id, skills: [toSkillRef(cfg.skillRef.trim() || SKILL_REF)], ...(t.files?.length ? { files: t.files } : {}) }),
             config,
           })
           relayTaskId = task.id

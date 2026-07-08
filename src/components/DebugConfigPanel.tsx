@@ -56,7 +56,7 @@ function ConfigForm({ data }: { data: DebugConfig }) {
         def={data.defaults.skillRef}
         rows={3}
         disabled={!admin}
-        hint={<>所有 OP 共用；各自<b>下个新会话</b>生效。</>}
+        hint={<>贴 GitHub URL(repo 或 skill 目录,不用加 <code>github:</code> 前缀);所有 OP 共用,各自<b>下个新会话</b>生效。</>}
       />
 
       <div className="debug-sep" />

@@ -16,7 +16,7 @@
  */
 import { ensureDefaultAgentComputer } from './provision.ts'
 import { seedTravelkit } from './seed.ts'
-import { SKILL_REF } from '../../worker/skill-ref.ts'
+import { SKILL_REF, toSkillRef } from '../../worker/skill-ref.ts'
 import { rebyteJSON, rebyteFetch } from './client.ts'
 import { parseSSE, isObj } from './sse.ts'
 
@@ -147,7 +147,7 @@ async function main() {
   const task = await rebyteJSON<{ id: string; status?: string }>('/tasks', {
     method: 'POST',
     // skills → relay installs rebyte-flight from GitHub into the VM before the manager runs (turn 1 only).
-    body: JSON.stringify({ prompt: turns[0], workspaceId: ac.id, skills: [SKILL_REF] }),
+    body: JSON.stringify({ prompt: turns[0], workspaceId: ac.id, skills: [toSkillRef(SKILL_REF)] }),
   })
   console.log(`[multiturn]     relayTask=${task.id}`)
 

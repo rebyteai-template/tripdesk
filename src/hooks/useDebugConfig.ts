@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { getDebugConfig, saveDebugConfig } from '../api.ts'
+import { getDebugConfig, saveDebugConfig, type DebugConfig } from '../api.ts'
 import { queryKeys } from '../lib/queryKeys.ts'
 
 /** The GLOBAL debug config (skill ref + manager prompt) shared by all users. Only fetched when the
@@ -8,12 +8,17 @@ export function useDebugConfig() {
   return useQuery({ queryKey: queryKeys.debugConfig(), queryFn: getDebugConfig })
 }
 
-/** Save the global config (admin only; 403 otherwise). Refetches the config on success so the panel
- *  reflects the persisted values (empty field → server echoes it, and tasks fall back to defaults). */
+/** Save the global config (admin only; 403 otherwise). On success it writes the saved values into
+ *  the cache immediately — so the panel's "dirty" flag clears at once and the button settles to
+ *  已保存 with no refetch flicker — then invalidates to reconcile with the server. */
 export function useSaveDebugConfig() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: saveDebugConfig,
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: queryKeys.debugConfig() }) },
+    onSuccess: (_res, patch) => {
+      qc.setQueryData(queryKeys.debugConfig(), (old?: DebugConfig) =>
+        old ? { ...old, skillRef: patch.skillRef, systemPrompt: patch.systemPrompt } : old)
+      void qc.invalidateQueries({ queryKey: queryKeys.debugConfig() })
+    },
   })
 }

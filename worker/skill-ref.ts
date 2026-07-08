@@ -1,14 +1,24 @@
 /**
- * The flight skill reference — installed by the relay (cctools skills v3) from GitHub into the
- * workspace VM at ~/.claude/skills/rebyte-flight. Passed as the `skills` field on POST /v1/tasks.
+ * The flight skill — a plain GitHub repo URL, installed by the relay (cctools skills v3) via
+ * `skills add`, which installs ALL skills under the repo (currently just rebyte-flight, in
+ * skills/rebyte-flight/). Stored/edited/displayed WITHOUT the `github:` prefix so a user just
+ * copy-pastes a normal GitHub URL; `toSkillRef` adds the `github:` routing tag the /v1 `skills`
+ * param needs, right before we send it (the relay strips that tag and hands the URL verbatim to
+ * `skills add`, so a failure is a `skills add` failure).
  *
- * Shared by the production worker (worker/task-do.ts, first-turn task create) and the CLI probes
- * (server/rebyte/multiturn.ts, cardprobe.ts, subprobe.ts) so there is ONE source of truth for which
- * skill/ref installs. A `github:<owner/repo/tree/<branch>/<subdir>>` URL scopes the install to just
- * that skill dir. The repo is private → the relay clones it with the org's GitHub token (travelkit's
- * org binds GitHub in the rebyte UI).
+ * Private repo → the relay clones it with the org's GitHub token (bound in the rebyte UI). Tracking
+ * `main`: push to the repo to update; the next new session re-clones — zero travelkit rebuild/redeploy.
  *
- * Tracking `main`: to update the skill, push to the repo — the next new session re-clones latest,
- * with zero travelkit rebuild/redeploy.
+ * (To install just ONE skill from a multi-skill repo, paste a `/tree/<branch>/<subdir>` skill-
+ * directory URL instead — `skills add` scopes discovery to that subpath.)
+ *
+ * Shared by the production worker (worker/task-do.ts) and the CLI probes (server/rebyte/*).
  */
-export const SKILL_REF = 'github:https://github.com/rebyteai-template/rebyte-flight-skill/tree/main/skills/rebyte-flight'
+export const SKILL_REF = 'https://github.com/rebyteai-template/rebyte-flight-skill'
+
+/** Wrap a plain GitHub URL (or `owner/repo` shorthand) into the `/v1` `skills` ref: prepend the
+ *  `github:` routing tag unless it's already there. The URL is otherwise untouched — the relay strips
+ *  the tag and passes it verbatim to `skills add`. */
+export function toSkillRef(url: string): string {
+  return url.startsWith('github:') ? url : `github:${url}`
+}

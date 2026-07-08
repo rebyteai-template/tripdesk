@@ -18,7 +18,7 @@
 import { writeFileSync } from 'node:fs'
 import { ensureDefaultAgentComputer } from './provision.ts'
 import { seedTravelkit } from './seed.ts'
-import { SKILL_REF } from '../../worker/skill-ref.ts'
+import { SKILL_REF, toSkillRef } from '../../worker/skill-ref.ts'
 import { rebyteJSON, rebyteFetch } from './client.ts'
 import { parseSSE, isObj } from './sse.ts'
 import { derive } from '../../src/frames.ts'
@@ -73,7 +73,7 @@ async function main() {
   console.log('[subprobe] 3/5 POST /tasks…')
   const task = await rebyteJSON<{ id: string; url?: string }>('/tasks', {
     method: 'POST',
-    body: JSON.stringify({ prompt: PROMPT, workspaceId: ac.id, skills: [SKILL_REF] }), // skills → relay installs rebyte-flight from GitHub
+    body: JSON.stringify({ prompt: PROMPT, workspaceId: ac.id, skills: [toSkillRef(SKILL_REF)] }), // skills → relay installs rebyte-flight from GitHub
   })
   console.log(`[subprobe]     task=${task.id} ${task.url ?? ''}`)
 
