@@ -16,7 +16,7 @@
 
 **解决（2026-06-08，已落实）**：换用 `travelkit-pro` skill，它**不再依赖 shell env var**，而是自己
 从 CWD 向上找最近的 `.simplifly.env` **dotenv 文件并直接解析**。于是 rebyte 那个 env 注入 gap 变得
-无关紧要。代码侧已对齐：`worker/seed.ts` `credentialsEnv()` 写**纯 `KEY=value`** 的 `/code/.simplifly.env`
+无关紧要。代码侧已对齐：`worker/seed.ts` `credentialsEnv()` 写**纯 `KEY=value`** 的 `/home/user/.simplifly.env`
 （去掉了 `export` 前缀和 `source` 兜底注释），**删掉**了 `.claude/settings.json` 的 `env` 镜像写入
 （`settingsJson()` 已移除），CLI 探针 `server/rebyte/seed.ts` 同步改写。`STALE_FILES` 增加
 `.claude/settings.json` + 旧 `.claude/skills/travelkit/**`，re-seed 时真删。`CREDENTIAL_SCHEMA` bump 到
@@ -25,9 +25,9 @@
 **`.simplifly.env` 契约**（`travelkit-pro` repo `TravelKit-AI/skills-travelkit-wfl` 的
 `SKILL.md` Core Boundaries + `references/api-map.md`，我们 seed 侧据此写文件）：
 
-- 从 CWD **向上逐层找最近的 `.simplifly.env`**，按标准 dotenv 解析；不许 hardcode 绝对路径。
+- 从 CWD **向上逐层找最近的 `.simplifly.env`**，找不到再读 `/home/user/.simplifly.env`，按标准 dotenv 解析。
 - 若最近的 `.simplifly.env` 落在 `skills/` 目录内 → 视为非法位置拒用（必须放在 skill 包外）。
-  我们写 `/code/.simplifly.env`（在 `/code` 根、CWD 向上可达、在 `.claude/skills/` 外）即满足。
+  TripDesk 写 `/home/user/.simplifly.env`（在 `.claude/skills/` 外）即满足。
 - skill 绝不创建/改/输出该文件（=我们 seed 写的外部私有配置）；缺了就停并让用户提供。
 - 字段：`SIMPLIFLY_BASE_URL`、`SIMPLIFLY_AUTH_TOKEN`（必需）；`SIMPLIFLY_ACCEPT_LANGUAGE`
   （默认 `zh-Hans`）、`SIMPLIFLY_SF_MODE`（默认 `buyer`，可 `buyer|seller`）可选 → seed 不写，用默认。

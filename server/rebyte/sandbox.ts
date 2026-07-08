@@ -6,7 +6,7 @@
  * with the sandbox's own X-API-KEY is the reliable path.
  *
  * The envd file API takes a multipart `file` field, auths via X-API-KEY, and auto-creates parent
- * dirs. Paths here are absolute sandbox paths (e.g. `/code/.simplifly.env`).
+ * dirs. Paths here are absolute sandbox paths (e.g. `/home/user/.simplifly.env`).
  */
 import type { AgentComputer } from './provision.ts'
 

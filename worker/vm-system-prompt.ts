@@ -42,7 +42,7 @@ export const SEED_CLAUDE_MD = `# Kitty 机票预订 agent
  *  v6: skills-v3 cutover — install rebyte-flight from GitHub, purge the old /code/.claude/skills tree.
  *  v7: skill renamed rebyte-flight → simplifly-flyai-skill (repo moved to TravelKit-AI); re-write
  *      CLAUDE.md so its skill name/path matches what SKILL_REF now installs.
- *  v8: simplifly-flyai-skill switched to signed OpenAPI auth; re-write .simplifly.env with
- *      SIMPLIFLY_CODE + SIMPLIFLY_API_KEY while retaining AUTH_TOKEN for compatibility.
- *  v9: harden CLAUDE.md against credential-file diagnostics that print .simplifly.env. */
-export const SEED_VERSION = 'v9-no-credential-dumps'
+ *  v8: trial signed OpenAPI auth seed.
+ *  v9: harden CLAUDE.md against credential-file diagnostics that print .simplifly.env.
+ *  v10: restore TripDesk bearer-token auth; .simplifly.env only carries SIMPLIFLY_AUTH_TOKEN. */
+export const SEED_VERSION = 'v10-bearer-simplifly-token'

@@ -39,28 +39,12 @@ const SIMPLIFLY_BASE_URL = 'https://api-ap-east-1.simplifly.tech'
  *  searches from CWD upward for the nearest `.simplifly.env`, then a fixed `$HOME/.simplifly.env`
  *  fallback; it does NOT rely on shell env vars. So this is the single source of the credential — no `.claude/settings.json` mirror, no
  *  `source` step. Plain `KEY=value` (no `export ` prefix — not every dotenv parser strips it).
- *  Newer simplifly-flyai-skill uses signed OpenAPI auth (`SIMPLIFLY_CODE` + `SIMPLIFLY_API_KEY`).
- *  The iframe handoff token is the API key, and its JWT payload carries the agency id/code. Keep
- *  `SIMPLIFLY_AUTH_TOKEN` too so older installed skills keep working during rollout. */
-function agencyCodeFromToken(token: string): string {
-  const payload = token.split('.')[1]
-  if (!payload) return ''
-  try {
-    const b64 = payload.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(payload.length / 4) * 4, '=')
-    const parsed = JSON.parse(atob(b64)) as { id?: unknown }
-    return parsed.id === undefined || parsed.id === null ? '' : String(parsed.id)
-  } catch {
-    return ''
-  }
-}
-
+ *  TripDesk handoff tokens are Simplifly bearer tokens; do not derive signed-auth credentials
+ *  from them. */
 function credentialsEnv(token: string): string {
-  const agencyCode = agencyCodeFromToken(token)
   return (
     `# Simplifly credentials for the simplifly-flyai-skill skill (per-user, written at sandbox seed time).\n` +
     `SIMPLIFLY_BASE_URL=${SIMPLIFLY_BASE_URL}\n` +
-    (agencyCode ? `SIMPLIFLY_CODE=${agencyCode}\n` : '') +
-    `SIMPLIFLY_API_KEY=${token}\n` +
     `SIMPLIFLY_AUTH_TOKEN=${token}\n`
   )
 }
@@ -98,13 +82,13 @@ async function writeFile(ac: ProvisionedComputer, rel: string, content: string):
   if (!res.ok) throw new Error(`write ${rel} failed: HTTP ${res.status}`)
 }
 
-/** Seed the two per-deployment/per-user files into the sandbox /code — the VM system prompt
- *  (/code/CLAUDE.md, via writeClaudeMd) and the per-user Simplifly credential (/code/.simplifly.env,
+/** Seed the two per-deployment/per-user files into the sandbox — the VM system prompt
+ *  (/code/CLAUDE.md, via writeClaudeMd) and the per-user Simplifly credential (/home/user/.simplifly.env,
  *  via applyCredential). The SKILL itself is NOT written here: the relay installs `simplifly-flyai-skill`
  *  from GitHub (skills v3). The token is NOT part of any build artifact — it comes per-user from the
  *  iframe handoff. */
 export async function seedSandbox(ac: ProvisionedComputer, travelkitToken: string): Promise<void> {
-  // Disjoint files (/code/CLAUDE.md vs /code/.simplifly.env), independent envd calls → write in parallel.
+  // Disjoint files (/code/CLAUDE.md vs /home/user/.simplifly.env), independent envd calls → write in parallel.
   await Promise.all([writeClaudeMd(ac), applyCredential(ac, travelkitToken)])
 }
 
