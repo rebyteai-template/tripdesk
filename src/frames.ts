@@ -342,8 +342,47 @@ function parseToolJson(raw: string): Record<string, unknown> | null {
     const json = JSON.parse(raw)
     return isObj(json) ? json : null
   } catch {
-    return null
+    const extracted = firstJsonObject(raw)
+    if (!extracted) return null
+    try {
+      const json = JSON.parse(extracted)
+      return isObj(json) ? json : null
+    } catch {
+      return null
+    }
   }
+}
+
+/** Bash tool_result sometimes appends shell bookkeeping after stdout. The skill's first stdout
+ *  object is still the authoritative compact payload; ignore anything after its closing brace. */
+function firstJsonObject(raw: string): string | null {
+  const start = raw.indexOf('{')
+  if (start < 0) return null
+  let depth = 0
+  let inString = false
+  let escaped = false
+  for (let i = start; i < raw.length; i++) {
+    const ch = raw[i]
+    if (inString) {
+      if (escaped) {
+        escaped = false
+      } else if (ch === '\\') {
+        escaped = true
+      } else if (ch === '"') {
+        inString = false
+      }
+      continue
+    }
+    if (ch === '"') {
+      inString = true
+    } else if (ch === '{') {
+      depth++
+    } else if (ch === '}') {
+      depth--
+      if (depth === 0) return raw.slice(start, i + 1)
+    }
+  }
+  return null
 }
 
 /** simplifly-flyai-skill compact search JSON → search view model. Tool-name agnostic: this is
