@@ -33,6 +33,7 @@ function compactSearch(optionNumber: number, flightNo: string, amount: number) {
     displayOptions: [
       {
         optionNumber,
+        solutionId: `sol-${flightNo.toLowerCase()}`,
         journeyType: '直飞',
         duration: '2h',
         durationMinutes: 120,
@@ -79,6 +80,7 @@ test('derive parses compact search JSON before trailing shell output', () => {
   const view = derive([promptWithToolResult(`${JSON.stringify(compact)}\nShell cwd was reset to /code\n`)])
   assert.equal(view.stage, 'search')
   assert.equal(view.search?.options.length, 1)
+  assert.equal(view.search?.options[0]?.solutionId, 'sol-mu5186')
   assert.equal(view.chat.at(-1)?.cards?.length, 1)
 })
 
@@ -120,6 +122,7 @@ test('derive preserves multiple compact searches in one turn', () => {
   assert.equal(secondCard.journeys[0]?.segments[0]?.flightNo, 'JL0022')
   assert.equal(firstCard.displayNumber, 1)
   assert.equal(secondCard.displayNumber, 2)
-  assert.equal(secondCard.selectionLabel, '第2组方案1')
+  assert.equal(secondCard.searchGroupIndex, 2)
+  assert.equal(secondCard.selectionLabel, '第2次搜索/报价结果的原始方案1')
   assert.equal(latestSearch.journeys[0]?.segments[0]?.flightNo, 'JL0022')
 })

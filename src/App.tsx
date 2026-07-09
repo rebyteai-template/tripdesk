@@ -80,7 +80,7 @@ export function App() {
   // Single-column chat stream: search cards, verify card, and the write-flow (passenger form /
   // confirm gate) all render inline. The verify card's entry CTA is offered only while no write-flow
   // step is open (mode === 'auto'); ChatPanel further limits it to the latest fare card.
-  const selectOption = (label: string) => send(`我选序号 ${label}，请帮我验价`)
+  const selectOption = (prompt: string) => send(prompt)
 
   if (me.isError) return <Unauthorized />
   if (me.isPending) return <div className="app-booting" aria-busy="true" />

@@ -140,7 +140,7 @@ body {
 }
 
 /* chat — the single conversation column, centered with a comfortable reading width */
-.chat { flex: 1; overflow: auto; padding: 18px; display: flex; flex-direction: column; gap: 12px; width: 100%; max-width: 960px; margin: 0 auto; }
+.chat { flex: 1; overflow: auto; padding: 22px clamp(20px, 3vw, 36px); display: flex; flex-direction: column; gap: 12px; width: 100%; max-width: 1280px; margin: 0 auto; }
 .chat-welcome { color: var(--muted); margin-top: 12px; }
 .chat-welcome h1 { color: var(--text); margin: 0 0 4px; font-size: 22px; font-family: 'Newsreader', Georgia, 'Source Han Serif SC', serif; font-weight: 500; }
 /* cold-start quick actions — one tap fills the composer (editable) */
@@ -153,7 +153,7 @@ body {
 .suggestion svg { color: var(--accent); flex-shrink: 0; }
 .suggestion:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); }
 .suggestion:disabled { opacity: .5; cursor: default; }
-.bubble { padding: 10px 13px; border-radius: var(--radius-lg); max-width: 88%; white-space: pre-wrap; word-break: break-word; }
+.bubble { padding: 10px 13px; border-radius: var(--radius-lg); max-width: 92%; white-space: pre-wrap; word-break: break-word; }
 .bubble.user { align-self: flex-end; background: var(--accent); color: var(--on-accent); border-bottom-right-radius: 4px; }
 .bubble.assistant { align-self: flex-start; background: var(--panel-2); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
 .bubble.typing { color: var(--muted); }
@@ -161,7 +161,7 @@ body {
 
 /* Message wrapper: stacks a bubble (or card group / attachments) over its send-time stamp,
    aligned to the sender. The inner bubble keeps its own align-self; align-items places the time. */
-.msg { display: flex; flex-direction: column; gap: 4px; max-width: 88%; }
+.msg { display: flex; flex-direction: column; gap: 4px; max-width: 92%; }
 .msg.user { align-self: flex-end; align-items: flex-end; }
 .msg.assistant { align-self: flex-start; align-items: flex-start; }
 .msg.full { align-self: stretch; max-width: 100%; align-items: flex-start; }  /* search / fare card turns */
@@ -203,9 +203,9 @@ body {
 
 /* ── composer ──────────────────────────────────────────────────────────── */
 /* The bar blends into the chat canvas; the rounded shell is the raised input surface. */
-.composer { padding: 8px 16px 16px; background: var(--bg); }
+.composer { padding: 8px clamp(20px, 3vw, 36px) 18px; background: var(--bg); }
 .composer-shell {
-  max-width: 960px; margin: 0 auto;
+  max-width: 1280px; margin: 0 auto;
   background: var(--panel); border: 1px solid var(--kami-border-2); border-radius: var(--radius-xl); padding: 6px;
   box-shadow: 0 1px 2px rgba(20, 20, 19, .05), 0 6px 18px rgba(20, 20, 19, .05);
   transition: border-color .16s ease, box-shadow .16s ease;

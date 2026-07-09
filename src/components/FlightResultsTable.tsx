@@ -88,6 +88,47 @@ function optionSummary(o: CompactOption): string {
   return `方案 ${o.displayNumber ?? o.optionNumber} · ${firstSegment.flightNo} · ${timeCell(firstJourney, firstSegment)} · ${priceDisplay(o)}`
 }
 
+function passengerCountForPrompt(o: CompactOption): string {
+  const perType = o.price.perType ?? {}
+  const count = (type: string) => perType[type]?.num ?? 0
+  const adult = count('adult')
+  const child = count('child')
+  const infant = count('infant')
+  if (adult || child || infant) return `adult=${adult}, child=${child}, infant=${infant}`
+  return '沿用本次查询的乘客人数'
+}
+
+export function buildVerifyPrompt(o: CompactOption): string {
+  const selector = o.selectionLabel ?? `原始方案${o.optionNumber}`
+  const checks = o.journeys.flatMap((journey, ji) =>
+    journey.segments.map((segment) => {
+      const label = o.journeys.length > 1 ? `${ji === 0 ? '去程' : ji === 1 ? '回程' : `第${ji + 1}程`}` : ''
+      return `${label}${segment.flightNo} ${segment.departureDate} ${segment.departure}${segment.arrival} ${segment.departureTime}-${segment.arrivalTime} ${segment.cabin}`
+    }),
+  )
+  const selection = o.solutionId
+    ? `- solutionId: ${o.solutionId}`
+    : `- ${selector}`
+  const verifyCommand = o.solutionId
+    ? '请使用 simplifly-flyai-skill verify --solution-id 核验这个 solutionId 的实时价格和可售性。'
+    : '请使用 simplifly-flyai-skill verify 核验这个方案的实时价格和可售性。'
+  return [
+    '请对以下方案做实时验价。',
+    '',
+    'selection:',
+    selection,
+    o.solutionId ? '' : `- originalOptionNumber: ${o.optionNumber}`,
+    `- passengers: ${passengerCountForPrompt(o)}`,
+    '',
+    'expected itinerary:',
+    ...checks.map((check) => `- ${check}`),
+    '',
+    `expected displayed price: ${priceDisplay(o)}`,
+    '',
+    `${verifyCommand} 验价成功后返回价格、舱位、行李是否变化；不要下单。`,
+  ].filter(Boolean).join('\n')
+}
+
 function journeyLabel(o: CompactOption, j: CompactJourney, index: number): string {
   const stops = stopsLabel(j.transferCount)
   if (o.journeys.length === 1) return stops
@@ -130,7 +171,6 @@ interface FlightTableRow {
   option: CompactOption
   optionKey: string
   optionNumber: number | ''
-  selectionLabel: string
   journey: string
   flightNo: string
   date: string
@@ -170,7 +210,7 @@ export function FlightResultsTable({
   options: CompactOption[]
   totalCount?: number
   contextText?: string
-  onBook: (label: string) => void
+  onBook: (prompt: string) => void
   busy: boolean
 }) {
   const [copied, setCopied] = useState<string | null>(null)
@@ -197,7 +237,6 @@ export function FlightResultsTable({
           option: o,
           optionKey,
           optionNumber: first ? (o.displayNumber ?? o.optionNumber) : '',
-          selectionLabel: o.selectionLabel ?? String(o.optionNumber),
           journey: journeyFirst ? journeyLabel(o, j, ji) : '',
           flightNo: s.flightNo,
           date: dateCn(s.departureDate),
@@ -239,6 +278,7 @@ export function FlightResultsTable({
           <thead>
             <tr>
               <th>方案</th>
+              <th>操作</th>
               <th>航程</th>
               <th>航班号</th>
               <th>日期</th>
@@ -250,7 +290,6 @@ export function FlightResultsTable({
               <th>价格</th>
               {showTotal ? <th>总价</th> : null}
               <th>供应渠道</th>
-              <th>操作</th>
             </tr>
           </thead>
           <tbody>
@@ -261,6 +300,14 @@ export function FlightResultsTable({
                     <div className="option-mark">
                       <span className="option-num">{row.optionNumber}</span>
                       {row.badges.map((badge) => <span key={badge} className="option-badge">{badge}</span>)}
+                    </div>
+                  ) : null}
+                </td>
+                <td>
+                  {row.optionNumber ? (
+                    <div className="flight-actions">
+                      <button type="button" disabled={busy} onClick={() => onBook(buildVerifyPrompt(row.option))}>验价</button>
+                      <button type="button" onClick={() => onCopy(row.option)}>{copied === row.optionKey ? '已复制' : '复制'}</button>
                     </div>
                   ) : null}
                 </td>
@@ -275,14 +322,6 @@ export function FlightResultsTable({
                 <td className="num">{row.price}</td>
                 {showTotal ? <td className="num">{row.price}</td> : null}
                 <td>{row.source}</td>
-                <td>
-                  {row.optionNumber ? (
-                    <div className="flight-actions">
-                      <button type="button" onClick={() => onCopy(row.option)}>{copied === row.optionKey ? '已复制' : 'Copy'}</button>
-                      <button type="button" disabled={busy} onClick={() => onBook(row.selectionLabel)}>验价</button>
-                    </div>
-                  ) : null}
-                </td>
               </tr>
             ))}
           </tbody>

@@ -7,9 +7,8 @@
  * the active stage (a fresh search after a verify drops back to results).
  *
  * We read the FULL `assistant` / `user` / `result` frames and ignore the partial
- * `stream_event` deltas — simpler and good enough. Internal IDs
- * (solutionId/orderKey/coreSegmentId/airline codes) live only in the agent's
- * tool args and are never surfaced here.
+ * `stream_event` deltas — simpler and good enough. API-returned business fields
+ * may surface in this internal workbench; credentials and request secrets must not.
  */
 import type { Attachment, PromptContent } from './api.ts'
 
@@ -17,8 +16,8 @@ import type { Attachment, PromptContent } from './api.ts'
 // The skill runs python scripts in the sandbox; the structured result we can parse
 // is the COMPACT JSON (flight_search_compact.py stdout), replayed into our frames from
 // the sub-session. `displayOptions` = the skill's curated recommendations, each fully
-// structured. `displayMapping` (which carries the private solutionId) stays agent-side
-// and is never read here. Cards mirror whatever the skill recommended — the real
+// structured, including solutionId for exact verify. `displayMapping` stays unused.
+// Cards mirror whatever the skill recommended — the real
 // filtering/refinement ("拉扯") happens conversationally in chat.
 export interface CompactSegment {
   flightNo: string
@@ -51,9 +50,11 @@ export interface CompactJourney {
   segments: CompactSegment[]
 }
 export interface CompactOption {
-  optionNumber: number     // the user-visible 序号; selection rides this, never solutionId
+  optionNumber: number     // skill-visible option number; UI may displayNumber after merging
+  solutionId?: string      // search result handle used for exact verify; orderKey remains agent-side
   displayNumber?: number   // UI-only number when multiple compact searches are merged into one table
-  selectionLabel?: string  // UI-only disambiguation for verify prompts, e.g. "第2组方案1"
+  selectionLabel?: string  // disambiguation for verify prompts, e.g. "第2次搜索/报价结果的原始方案1"
+  searchGroupIndex?: number // 1-based order when multiple compact searches are merged into one table
   section?: string
   tag?: string | null
   journeyType: string      // "单程直飞" | "单程中转N次" | "多程"
@@ -81,8 +82,8 @@ export interface SearchResult {
 // ── verify (simplifly-flyai-skill compact: flight_verify_selected.py) ──────────
 // The verify result is COMPACT family too — a Bash result recognised by shape
 // (`selectedOption`+`verifiedOption`), NOT an MCP tool by name. `verifiedOption` re-states the
-// chosen option re-priced; `comparison` flags any change. Internal ids (solutionId/orderKey) stay
-// in the script's private fields and are never read here. FareVerification is the booking fare
+// chosen option re-priced; `comparison` flags any change. orderKey stays
+// in the script's private fields and is never read here. FareVerification is the booking fare
 // model the write-flow consumes; compact fills what it has and leaves the rest empty (the card
 // hides those) rather than faking per-pax splits / structured rules / availability.
 export interface FareLeg {
@@ -355,7 +356,8 @@ function mergeSearchResults(searches: SearchResult[]): SearchResult {
     search.options.map((option) => ({
       ...option,
       displayNumber: displayNumber++,
-      selectionLabel: `第${searchIndex + 1}组方案${option.optionNumber}`,
+      selectionLabel: `第${searchIndex + 1}次搜索/报价结果的原始方案${option.optionNumber}`,
+      searchGroupIndex: searchIndex + 1,
     })),
   )
   return { options }
@@ -412,7 +414,7 @@ function firstJsonObject(raw: string): string | null {
 
 /** simplifly-flyai-skill compact search JSON → search view model. Tool-name agnostic: this is
  *  a Bash result (python script stdout), recognised by its `displayOptions`/`displayMapping`
- *  shape. We read only the public `displayOptions`; `displayMapping.solutionId` stays private. */
+ *  shape. We read only the public `displayOptions`; `displayMapping` stays unused. */
 function parseCompactSearch(json: Record<string, unknown>): SearchResult | null {
   if (!Array.isArray(json.displayOptions) || !isObj(json.displayMapping)) return null
   const options: CompactOption[] = []
@@ -478,6 +480,7 @@ function toCompactOption(raw: unknown): CompactOption | null {
   const perType = parseCompactPricePerType(price.perType)
   return {
     optionNumber,
+    solutionId: str(raw.solutionId) || undefined,
     section: str(raw.section) || undefined,
     tag: str(raw.tag) || null,
     journeyType: str(raw.journeyType) || (firstTransfer === 0 ? '直飞' : `中转${firstTransfer}次`),
@@ -496,7 +499,7 @@ function toCompactOption(raw: unknown): CompactOption | null {
 
 /** simplifly-flyai-skill compact verify JSON (flight_verify_selected.py stdout) → fare view model.
  *  Recognised by shape (`selectedOption`+`verifiedOption`), like the compact search. We read the
- *  curated `verifiedOption` summary only; solutionId/orderKey stay in the script's private fields.
+ *  curated `verifiedOption` summary only; orderKey stays in the script's private fields.
  *  Compact carries no per-passenger price split, structured fare rules, or seat availability — those
  *  stay empty (the card hides them) rather than being faked. */
 function parseCompactVerify(json: Record<string, unknown>): FareVerification | null {

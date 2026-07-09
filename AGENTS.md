@@ -38,7 +38,7 @@ set -a; . ./cloudflare.env; set +a && pnpm run deploy
 - **每任务一个 Durable Object** `TaskDO`（`worker/task-do.ts`）：turn 跑在 `alarm()` 里（`ctx.waitUntil` 长 turn 会被驱逐），分 20s 窗口流式推进，进度持久化（relayTaskId/lastSeq）可幂等续。**一个 session 复用同一个 relay task**：首轮 `POST /tasks`，续轮 `POST /tasks/:tid/prompts`——这样 agent 保留多轮上下文。
 - **领域状态机** `src/frames.ts`：把 relay 事件翻译成的 stream-json frame 里的 travelkit `tool_result` 解析成 `stage`(search/verify/order/payment) + 各阶段数据 + `notice`。**UI 是工具结果的镜像**，agent 不额外写文件。
 - **bench 卡片**（`src/components/`）：`SearchResultsTable`/`FareDetailCard`/`PassengerForm`/`ConfirmGate` 已有；订单卡/支付/售后待做。`Bench.tsx` 按 stage 切视图，`Composer.tsx` 把 UI 手势拼成下一句 prompt。
-- **内部 ID（solutionId/orderKey/PNR/票号）全留 agent 侧**，永不进 UI/URL/chip。
+- **API 返回的业务字段可进入内部工作台 UI/prompt**（如 solutionId/orderKey/PNR/票号），用于精确验价、售后和排障；凭证/token/请求头等机密仍不得提交、打印或进入 UI。
 
 ## rebyte 集成
 
