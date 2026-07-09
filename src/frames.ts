@@ -245,6 +245,8 @@ export function derive(prompts: PromptContent[]): DerivedView {
     // redundant markdown table), else flush as a standalone card bubble at prompt end.
     let pendingSearches: SearchResult[] = []
     let pendingFare: FareVerification | null = null
+    let successfulVerifyCount = 0
+    let lastAssistantTextBubble: ChatBubble | null = null
 
     for (const f of p.frames) {
       const data = f.data
@@ -271,18 +273,9 @@ export function derive(prompts: PromptContent[]): DerivedView {
         const text = textFromContent(content)
         if (text.trim()) {
           const key = `a-${(data.message as Record<string, unknown>).id ?? f.seq}-${f.seq}`
-          // A search / verify card attaches to this turn's prose, with the redundant markdown
-          // table stripped (the card shows the same data). Both can ride one bubble.
           const bubble: ChatBubble = { key, role: 'assistant', text, ts: replyTs }
-          if (pendingSearches.length || pendingFare) bubble.text = stripTables(text)
-          if (pendingSearches.length) {
-            const merged = mergeSearchResults(pendingSearches)
-            bubble.cards = merged.options
-            bubble.totalCount = merged.totalCount
-            pendingSearches = []
-          }
-          if (pendingFare) { bubble.fare = pendingFare; pendingFare = null }
           chat.push(bubble)
+          lastAssistantTextBubble = bubble
         }
       }
 
@@ -320,7 +313,10 @@ export function derive(prompts: PromptContent[]): DerivedView {
               notice = verifyErrorNotice(payload)
             } else {
               const parsed = parseCompactVerify(payload)
-              if (parsed) { fare = parsed; pendingFare = parsed; notice = null; stage = 'verify' }
+              if (parsed) {
+                successfulVerifyCount += 1
+                fare = parsed; pendingFare = parsed; notice = null; stage = 'verify'
+              }
             }
             continue
           }
@@ -329,12 +325,27 @@ export function derive(prompts: PromptContent[]): DerivedView {
       }
     }
 
-    // a search / verify with no trailing summary text → standalone card bubble (keeps it visible)
+    // Domain cards render at the turn tail so a retry/ack text frame cannot consume them before the
+    // real final answer arrives. Keep each compact search as its own table; merging multi-leg or
+    // multi-request searches into one giant table makes unrelated trip segments indistinguishable.
     if (pendingSearches.length) {
-      const merged = mergeSearchResults(pendingSearches)
-      chat.push({ key: `cards-${p.id}`, role: 'assistant', text: '', cards: merged.options, totalCount: merged.totalCount, ts: replyTs })
+      if (lastAssistantTextBubble) lastAssistantTextBubble.text = stripTables(lastAssistantTextBubble.text)
+      pendingSearches.forEach((searchResult, index) => {
+        chat.push({
+          key: `cards-${p.id}-${index}`,
+          role: 'assistant',
+          text: '',
+          cards: searchResult.options,
+          totalCount: searchResult.totalCount,
+          ts: replyTs,
+        })
+      })
     }
-    if (pendingFare) {
+    // A turn that verifies several options is an agent comparison, not a single actionable fare.
+    // Rendering the last successful verify as "the" fare card surfaces arbitrary alternatives
+    // (for example WN3888) after the agent already summarized the real choice in text.
+    if (pendingFare && successfulVerifyCount === 1) {
+      if (lastAssistantTextBubble) lastAssistantTextBubble.text = stripTables(lastAssistantTextBubble.text)
       chat.push({ key: `fare-${p.id}`, role: 'assistant', text: '', fare: pendingFare, ts: replyTs })
     }
   }
@@ -347,20 +358,6 @@ export function derive(prompts: PromptContent[]): DerivedView {
     deduped.push(b)
   }
   return { chat: deduped, stage, search, fare, notice }
-}
-
-function mergeSearchResults(searches: SearchResult[]): SearchResult {
-  if (searches.length <= 1) return searches[0] ?? { options: [] }
-  let displayNumber = 1
-  const options = searches.flatMap((search, searchIndex) =>
-    search.options.map((option) => ({
-      ...option,
-      displayNumber: displayNumber++,
-      selectionLabel: `第${searchIndex + 1}次搜索/报价结果的原始方案${option.optionNumber}`,
-      searchGroupIndex: searchIndex + 1,
-    })),
-  )
-  return { options }
 }
 
 function parseToolJson(raw: string): Record<string, unknown> | null {

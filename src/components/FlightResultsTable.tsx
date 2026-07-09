@@ -36,8 +36,7 @@ function airportName(code: string, name?: string, terminal?: string): string {
 }
 
 function routeCell(s: CompactSegment): string {
-  const routeCode = `${s.departure}${s.arrival}`
-  return `${routeCode}  ${airportName(s.departure, s.departureName, s.departureTerminal)} → ${airportName(s.arrival, s.arrivalName, s.arrivalTerminal)}`
+  return `${s.departure}${s.arrival} ${airportName(s.departure, s.departureName, s.departureTerminal)} → ${airportName(s.arrival, s.arrivalName, s.arrivalTerminal)}`
 }
 
 function crossDays(j: CompactJourney, s: CompactSegment): number {
@@ -185,42 +184,35 @@ interface FlightTableRow {
   badges: string[]
 }
 
-async function writeClipboard(text: string): Promise<void> {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text)
-    return
-  }
-  const el = document.createElement('textarea')
-  el.value = text
-  el.style.position = 'fixed'
-  el.style.left = '-9999px'
-  document.body.appendChild(el)
-  el.select()
-  document.execCommand('copy')
-  document.body.removeChild(el)
+interface FlightOptionGroup {
+  key: string
+  title: string
+  options: CompactOption[]
 }
 
-export function FlightResultsTable({
-  options,
-  totalCount,
-  contextText = '',
-  onBook,
-  busy,
-}: {
-  options: CompactOption[]
-  totalCount?: number
-  contextText?: string
-  onBook: (prompt: string) => void
-  busy: boolean
-}) {
-  const [copied, setCopied] = useState<string | null>(null)
-  const showTotal = useMemo(() => options.some((o) => o.journeys.length > 2), [options])
-  const recommended = useMemo(() => recommendedFlights(contextText), [contextText])
-  const recommendedOptions = useMemo(() => options.filter((o) => {
-    const tagged = /推荐|综合/.test(o.tag ?? '')
-    return tagged || optionFlights(o).some((flightNo) => recommended.has(flightNo))
-  }), [options, recommended])
-  const rows = useMemo<FlightTableRow[]>(() => options.flatMap((o) => {
+function sectionTitle(section?: string): string {
+  const title = section?.trim() || '航班方案'
+  return title.startsWith('【') ? title : `【${title}】`
+}
+
+function groupBySection(options: CompactOption[]): FlightOptionGroup[] {
+  const groups: FlightOptionGroup[] = []
+  const byKey = new Map<string, FlightOptionGroup>()
+  for (const option of options) {
+    const raw = option.section?.trim() || '航班方案'
+    let group = byKey.get(raw)
+    if (!group) {
+      group = { key: raw, title: sectionTitle(raw), options: [] }
+      byKey.set(raw, group)
+      groups.push(group)
+    }
+    group.options.push(option)
+  }
+  return groups
+}
+
+function buildRows(options: CompactOption[], recommendedOptions: CompactOption[]): FlightTableRow[] {
+  return options.flatMap((o) => {
     let rowIndex = 0
     const displayPrice = priceDisplay(o)
     const source = o.sourceDisplay || o.source || '未返回'
@@ -252,7 +244,48 @@ export function FlightResultsTable({
         }
       }),
     )
-  }), [options, recommendedOptions])
+  })
+}
+
+async function writeClipboard(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text)
+    return
+  }
+  const el = document.createElement('textarea')
+  el.value = text
+  el.style.position = 'fixed'
+  el.style.left = '-9999px'
+  document.body.appendChild(el)
+  el.select()
+  document.execCommand('copy')
+  document.body.removeChild(el)
+}
+
+export function FlightResultsTable({
+  options,
+  totalCount,
+  contextText = '',
+  onBook,
+  busy,
+}: {
+  options: CompactOption[]
+  totalCount?: number
+  contextText?: string
+  onBook: (prompt: string) => void
+  busy: boolean
+}) {
+  const [copied, setCopied] = useState<string | null>(null)
+  const showTotal = useMemo(() => options.some((o) => o.journeys.length > 2), [options])
+  const groups = useMemo(() => groupBySection(options), [options])
+  const recommended = useMemo(() => recommendedFlights(contextText), [contextText])
+  const recommendedOptions = useMemo(() => options.filter((o) => {
+    const tagged = /推荐|综合/.test(o.tag ?? '')
+    return tagged || optionFlights(o).some((flightNo) => recommended.has(flightNo))
+  }), [options, recommended])
+  const rowsByGroup = useMemo(() =>
+    groups.map((group) => ({ ...group, rows: buildRows(group.options, recommendedOptions) })),
+  [groups, recommendedOptions])
 
   async function onCopy(o: CompactOption) {
     await writeClipboard(copyText(o))
@@ -263,7 +296,7 @@ export function FlightResultsTable({
 
   return (
     <div className="results flight-table-block">
-      <div className="results-head">
+      <div className="results-head flight-results-summary">
         <h2>航班方案</h2>
         <span className="muted">{totalCount ? `共匹配 ${totalCount} 条，` : ''}显示 {options.length} 个方案</span>
       </div>
@@ -273,60 +306,65 @@ export function FlightResultsTable({
           <span>{recommendedOptions.map(optionSummary).join('；')}</span>
         </div>
       ) : null}
-      <div className="table-scroll">
-        <table className="flight-table">
-          <thead>
-            <tr>
-              <th>方案</th>
-              <th>操作</th>
-              <th>航程</th>
-              <th>航班号</th>
-              <th>日期</th>
-              <th>航段</th>
-              <th>时间</th>
-              <th>飞行时长</th>
-              <th>舱位</th>
-              <th>行李</th>
-              <th>价格</th>
-              {showTotal ? <th>总价</th> : null}
-              <th>供应渠道</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row.key} className={row.recommended ? 'recommended' : undefined}>
-                <td className="option-cell">
-                  {row.optionNumber ? (
-                    <div className="option-mark">
-                      <span className="option-num">{row.optionNumber}</span>
-                      {row.badges.map((badge) => <span key={badge} className="option-badge">{badge}</span>)}
-                    </div>
-                  ) : null}
-                </td>
-                <td>
-                  {row.optionNumber ? (
-                    <div className="flight-actions">
-                      <button type="button" disabled={busy} onClick={() => onBook(buildVerifyPrompt(row.option))}>验价</button>
-                      <button type="button" onClick={() => onCopy(row.option)}>{copied === row.optionKey ? '已复制' : '复制'}</button>
-                    </div>
-                  ) : null}
-                </td>
-                <td>{row.journey}</td>
-                <td className="mono">{row.flightNo}</td>
-                <td>{row.date}</td>
-                <td className="route-cell">{row.route}</td>
-                <td className="mono">{row.time}</td>
-                <td>{row.duration}</td>
-                <td>{row.cabin}</td>
-                <td>{row.baggage}</td>
-                <td className="num">{row.price}</td>
-                {showTotal ? <td className="num">{row.price}</td> : null}
-                <td>{row.source}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      {rowsByGroup.map((group) => (
+        <section key={group.key} className="flight-section">
+          <h3>{group.title}</h3>
+          <div className="table-scroll">
+            <table className="flight-table">
+              <thead>
+                <tr>
+                  <th>方案</th>
+                  <th>操作</th>
+                  <th>航程</th>
+                  <th>航班号</th>
+                  <th>日期</th>
+                  <th>航段</th>
+                  <th>时间</th>
+                  <th>飞行时长</th>
+                  <th>舱位</th>
+                  <th>行李</th>
+                  <th>价格</th>
+                  {showTotal ? <th>总价</th> : null}
+                  <th>供应渠道</th>
+                </tr>
+              </thead>
+              <tbody>
+                {group.rows.map((row) => (
+                  <tr key={row.key} className={row.recommended ? 'recommended' : undefined}>
+                    <td className="option-cell">
+                      {row.optionNumber ? (
+                        <div className="option-mark">
+                          <span className="option-num">{row.optionNumber}</span>
+                          {row.badges.map((badge) => <span key={badge} className="option-badge">{badge}</span>)}
+                        </div>
+                      ) : null}
+                    </td>
+                    <td>
+                      {row.optionNumber ? (
+                        <div className="flight-actions">
+                          <button type="button" disabled={busy} onClick={() => onBook(buildVerifyPrompt(row.option))}>验价</button>
+                          <button type="button" onClick={() => onCopy(row.option)}>{copied === row.optionKey ? '已复制' : '复制'}</button>
+                        </div>
+                      ) : null}
+                    </td>
+                    <td>{row.journey}</td>
+                    <td className="mono">{row.flightNo}</td>
+                    <td>{row.date}</td>
+                    <td className="route-cell">{row.route}</td>
+                    <td className="mono">{row.time}</td>
+                    <td>{row.duration}</td>
+                    <td>{row.cabin}</td>
+                    <td>{row.baggage}</td>
+                    <td className="num">{row.price}</td>
+                    {showTotal ? <td className="num">{row.price}</td> : null}
+                    <td>{row.source}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ))}
     </div>
   )
 }

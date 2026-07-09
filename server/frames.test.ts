@@ -112,17 +112,80 @@ test('derive preserves multiple compact searches in one turn', () => {
 
   const view = derive([prompt])
   const cardBubbles = view.chat.filter((b) => b.cards)
-  assert.equal(cardBubbles.length, 1)
-  assert.equal(cardBubbles[0]?.cards?.length, 2)
+  assert.equal(cardBubbles.length, 2)
+  assert.equal(cardBubbles[0]?.cards?.length, 1)
+  assert.equal(cardBubbles[1]?.cards?.length, 1)
   const firstCard = cardBubbles[0]?.cards?.[0]
-  const secondCard = cardBubbles[0]?.cards?.[1]
+  const secondCard = cardBubbles[1]?.cards?.[0]
   const latestSearch = view.search?.options[0]
   if (!firstCard || !secondCard || !latestSearch) throw new Error('expected card-backed searches')
   assert.equal(firstCard.journeys[0]?.segments[0]?.flightNo, 'NH0964')
   assert.equal(secondCard.journeys[0]?.segments[0]?.flightNo, 'JL0022')
-  assert.equal(firstCard.displayNumber, 1)
-  assert.equal(secondCard.displayNumber, 2)
-  assert.equal(secondCard.searchGroupIndex, 2)
-  assert.equal(secondCard.selectionLabel, '第2次搜索/报价结果的原始方案1')
   assert.equal(latestSearch.journeys[0]?.segments[0]?.flightNo, 'JL0022')
+})
+
+function compactVerify(flightNo: string, amount: number) {
+  return {
+    ok: true,
+    selectedOption: { optionNumber: 1 },
+    verifiedOption: {
+      price: { amount, currency: 'CNY' },
+      journeys: [
+        {
+          origin: 'SLC',
+          destination: 'BUF',
+          departureDate: '2026-10-02',
+          departureTime: '11:20',
+          arrivalDate: '2026-10-02',
+          arrivalTime: '20:05',
+          duration: '6h45m',
+          transferCount: 0,
+          segments: [
+            {
+              flightNo,
+              departure: 'SLC',
+              departureDate: '2026-10-02',
+              departureTime: '11:20',
+              arrival: 'BUF',
+              arrivalDate: '2026-10-02',
+              arrivalTime: '20:05',
+              cabin: '经济 T舱',
+            },
+          ],
+        },
+      ],
+    },
+  }
+}
+
+test('derive does not render the last fare card when a turn verifies multiple alternatives', () => {
+  const prompt = promptWithToolResult('')
+  prompt.frames = [
+    {
+      seq: 1,
+      data: {
+        type: 'user',
+        message: { content: [{ type: 'tool_result', content: JSON.stringify(compactVerify('AA2883', 3858)) }] },
+      },
+    },
+    {
+      seq: 2,
+      data: {
+        type: 'user',
+        message: { content: [{ type: 'tool_result', content: JSON.stringify(compactVerify('WN3888', 3978)) }] },
+      },
+    },
+    {
+      seq: 3,
+      data: {
+        type: 'assistant',
+        message: { content: [{ type: 'text', text: '| 方案 | 价格 |\n|---|---|\n| AA | ¥3858 |\n| WN | ¥3978 |' }] },
+      },
+    },
+  ]
+
+  const view = derive([prompt])
+
+  assert.equal(view.chat.some((b) => b.fare), false)
+  assert.match(view.chat.at(-1)?.text ?? '', /\| WN \| ¥3978 \|/)
 })
