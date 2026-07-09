@@ -59,6 +59,35 @@ function durationCell(j: CompactJourney): string {
   return `${j.duration}${layover}`
 }
 
+function recommendedFlights(text: string): Set<string> {
+  const set = new Set<string>()
+  const re = /推荐\s*([A-Z0-9]{2}\d{3,4})/gi
+  let match: RegExpExecArray | null
+  while ((match = re.exec(text))) {
+    const flightNo = match[1]
+    if (flightNo) set.add(flightNo.toUpperCase())
+  }
+  return set
+}
+
+function optionFlights(o: CompactOption): string[] {
+  return o.journeys.flatMap((j) => j.segments.map((s) => s.flightNo.toUpperCase()))
+}
+
+function optionBadges(o: CompactOption, isRecommended: boolean): string[] {
+  const tags = new Set<string>()
+  if (isRecommended) tags.add('推荐')
+  if (o.tag) tags.add(o.tag)
+  return [...tags]
+}
+
+function optionSummary(o: CompactOption): string {
+  const firstJourney = o.journeys[0]
+  const firstSegment = firstJourney?.segments[0]
+  if (!firstJourney || !firstSegment) return `方案 ${o.displayNumber ?? o.optionNumber}`
+  return `方案 ${o.displayNumber ?? o.optionNumber} · ${firstSegment.flightNo} · ${timeCell(firstJourney, firstSegment)} · ${priceDisplay(o)}`
+}
+
 function journeyLabel(o: CompactOption, j: CompactJourney, index: number): string {
   const stops = stopsLabel(j.transferCount)
   if (o.journeys.length === 1) return stops
@@ -112,6 +141,8 @@ interface FlightTableRow {
   baggage: string
   price: string
   source: string
+  recommended: boolean
+  badges: string[]
 }
 
 async function writeClipboard(text: string): Promise<void> {
@@ -132,21 +163,30 @@ async function writeClipboard(text: string): Promise<void> {
 export function FlightResultsTable({
   options,
   totalCount,
+  contextText = '',
   onBook,
   busy,
 }: {
   options: CompactOption[]
   totalCount?: number
+  contextText?: string
   onBook: (label: string) => void
   busy: boolean
 }) {
   const [copied, setCopied] = useState<string | null>(null)
   const showTotal = useMemo(() => options.some((o) => o.journeys.length > 2), [options])
+  const recommended = useMemo(() => recommendedFlights(contextText), [contextText])
+  const recommendedOptions = useMemo(() => options.filter((o) => {
+    const tagged = /推荐|综合/.test(o.tag ?? '')
+    return tagged || optionFlights(o).some((flightNo) => recommended.has(flightNo))
+  }), [options, recommended])
   const rows = useMemo<FlightTableRow[]>(() => options.flatMap((o) => {
     let rowIndex = 0
     const displayPrice = priceDisplay(o)
     const source = o.sourceDisplay || o.source || '未返回'
     const optionKey = `${o.displayNumber ?? o.optionNumber}:${o.optionNumber}:${o.journeys[0]?.segments[0]?.flightNo ?? ''}`
+    const isRecommended = recommendedOptions.includes(o)
+    const badges = optionBadges(o, isRecommended)
     return o.journeys.flatMap((j, ji) =>
       j.segments.map((s, si) => {
         const first = rowIndex === 0
@@ -168,10 +208,12 @@ export function FlightResultsTable({
           baggage: s.checkedBaggage || o.baggage || '未返回',
           price: first ? displayPrice : '',
           source: first ? source : '',
+          recommended: isRecommended,
+          badges: first ? badges : [],
         }
       }),
     )
-  }), [options])
+  }), [options, recommendedOptions])
 
   async function onCopy(o: CompactOption) {
     await writeClipboard(copyText(o))
@@ -186,6 +228,12 @@ export function FlightResultsTable({
         <h2>航班方案</h2>
         <span className="muted">{totalCount ? `共匹配 ${totalCount} 条，` : ''}显示 {options.length} 个方案</span>
       </div>
+      {recommendedOptions.length ? (
+        <div className="flight-recommend">
+          <span className="option-badge">推荐</span>
+          <span>{recommendedOptions.map(optionSummary).join('；')}</span>
+        </div>
+      ) : null}
       <div className="table-scroll">
         <table className="flight-table">
           <thead>
@@ -207,8 +255,15 @@ export function FlightResultsTable({
           </thead>
           <tbody>
             {rows.map((row) => (
-              <tr key={row.key}>
-                <td>{row.optionNumber}</td>
+              <tr key={row.key} className={row.recommended ? 'recommended' : undefined}>
+                <td className="option-cell">
+                  {row.optionNumber ? (
+                    <div className="option-mark">
+                      <span className="option-num">{row.optionNumber}</span>
+                      {row.badges.map((badge) => <span key={badge} className="option-badge">{badge}</span>)}
+                    </div>
+                  ) : null}
+                </td>
                 <td>{row.journey}</td>
                 <td className="mono">{row.flightNo}</td>
                 <td>{row.date}</td>

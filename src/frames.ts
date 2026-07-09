@@ -55,6 +55,7 @@ export interface CompactOption {
   displayNumber?: number   // UI-only number when multiple compact searches are merged into one table
   selectionLabel?: string  // UI-only disambiguation for verify prompts, e.g. "第2组方案1"
   section?: string
+  tag?: string | null
   journeyType: string      // "单程直飞" | "单程中转N次" | "多程"
   duration: string         // "2h10m"
   durationMinutes: number
@@ -478,6 +479,7 @@ function toCompactOption(raw: unknown): CompactOption | null {
   return {
     optionNumber,
     section: str(raw.section) || undefined,
+    tag: str(raw.tag) || null,
     journeyType: str(raw.journeyType) || (firstTransfer === 0 ? '直飞' : `中转${firstTransfer}次`),
     duration: str(raw.duration),
     durationMinutes: num(raw.durationMinutes),

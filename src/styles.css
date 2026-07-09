@@ -304,6 +304,29 @@ tr.cheapest td { background: var(--good-soft); }
 .flight-table { min-width: 1120px; table-layout: auto; }
 .flight-table th, .flight-table td { white-space: nowrap; vertical-align: top; }
 .flight-table .route-cell { white-space: normal; min-width: 260px; }
+.flight-table th:first-child,
+.flight-table .option-cell {
+  position: sticky; left: 0; z-index: 1; background: var(--panel);
+}
+.flight-table th:first-child { z-index: 2; background: var(--panel-2); }
+.flight-table tr.recommended td { background: var(--good-soft); }
+.flight-table tr.recommended .option-cell { background: var(--good-soft); }
+.option-cell { min-width: 92px; }
+.option-mark { display: flex; align-items: center; gap: 6px; }
+.option-num {
+  display: inline-grid; place-items: center; min-width: 24px; height: 24px;
+  border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-weight: 700;
+}
+.option-badge {
+  display: inline-flex; align-items: center; height: 22px; padding: 0 7px;
+  border-radius: 999px; background: var(--good); color: white; font-size: 12px; font-weight: 700;
+}
+.flight-recommend {
+  display: inline-flex; align-items: center; gap: 8px; max-width: 100%;
+  margin: -2px 0 10px; padding: 8px 10px; border: 1px solid var(--good-border);
+  border-radius: var(--radius-sm); background: var(--good-soft); color: var(--text);
+  font-size: 13px; line-height: 1.4;
+}
 .flight-actions { display: inline-flex; gap: 6px; align-items: center; }
 .flight-actions button { padding: 4px 9px; }
 .fare-table-block .results-head { align-items: center; }

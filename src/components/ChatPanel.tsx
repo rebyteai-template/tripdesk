@@ -91,7 +91,7 @@ export function ChatPanel({
                 <div className="chat-cards">
                   {b.text.trim() ? <div className="bubble assistant"><Markdown text={b.text} /></div> : null}
                   {b.cards
-                    ? <FlightResultsTable options={b.cards} totalCount={b.totalCount} onBook={onBook} busy={busy} />
+                    ? <FlightResultsTable options={b.cards} totalCount={b.totalCount} contextText={b.text} onBook={onBook} busy={busy} />
                     : <FareDetailTable fare={b.fare!} busy={busy} onContinue={b.fare === fareLatest ? onContinue : undefined} />}
                 </div>
                 <MsgTime ts={b.ts} />
