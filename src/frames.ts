@@ -215,14 +215,6 @@ function parseCompactPricePerType(raw: unknown): CompactOption['price']['perType
   return Object.keys(perType).length ? perType : undefined
 }
 
-/** Remove markdown table blocks from assistant text when the same options render as inline
- *  cards — avoids showing the data twice. Deterministic, no agent cooperation: drop lines
- *  shaped like table rows (`| … |`) and collapse the resulting gap. */
-function stripTables(text: string): string {
-  const kept = text.split('\n').filter((line) => !/^\s*\|.*\|\s*$/.test(line))
-  return kept.join('\n').replace(/\n{3,}/g, '\n\n').trim()
-}
-
 export function derive(prompts: PromptContent[]): DerivedView {
   const chat: ChatBubble[] = []
   let search: SearchResult | null = null
@@ -246,7 +238,6 @@ export function derive(prompts: PromptContent[]): DerivedView {
     let pendingSearches: SearchResult[] = []
     let pendingFare: FareVerification | null = null
     let successfulVerifyCount = 0
-    let lastAssistantTextBubble: ChatBubble | null = null
 
     for (const f of p.frames) {
       const data = f.data
@@ -275,7 +266,6 @@ export function derive(prompts: PromptContent[]): DerivedView {
           const key = `a-${(data.message as Record<string, unknown>).id ?? f.seq}-${f.seq}`
           const bubble: ChatBubble = { key, role: 'assistant', text, ts: replyTs }
           chat.push(bubble)
-          lastAssistantTextBubble = bubble
         }
       }
 
@@ -329,7 +319,6 @@ export function derive(prompts: PromptContent[]): DerivedView {
     // real final answer arrives. Keep each compact search as its own table; merging multi-leg or
     // multi-request searches into one giant table makes unrelated trip segments indistinguishable.
     if (pendingSearches.length) {
-      if (lastAssistantTextBubble) lastAssistantTextBubble.text = stripTables(lastAssistantTextBubble.text)
       pendingSearches.forEach((searchResult, index) => {
         chat.push({
           key: `cards-${p.id}-${index}`,
@@ -345,7 +334,6 @@ export function derive(prompts: PromptContent[]): DerivedView {
     // Rendering the last successful verify as "the" fare card surfaces arbitrary alternatives
     // (for example WN3888) after the agent already summarized the real choice in text.
     if (pendingFare && successfulVerifyCount === 1) {
-      if (lastAssistantTextBubble) lastAssistantTextBubble.text = stripTables(lastAssistantTextBubble.text)
       chat.push({ key: `fare-${p.id}`, role: 'assistant', text: '', fare: pendingFare, ts: replyTs })
     }
   }
