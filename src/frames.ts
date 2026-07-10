@@ -263,7 +263,7 @@ export function derive(prompts: PromptContent[]): DerivedView {
         // sub-agent's `Write`) has empty text and must NOT swallow the cards before the summary.
         const text = textFromContent(content)
         if (text.trim()) {
-          const key = `a-${(data.message as Record<string, unknown>).id ?? f.seq}-${f.seq}`
+          const key = `a-${p.id}-${(data.message as Record<string, unknown>).id ?? f.seq}-${f.seq}`
           const bubble: ChatBubble = { key, role: 'assistant', text, ts: replyTs }
           chat.push(bubble)
         }

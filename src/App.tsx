@@ -32,7 +32,7 @@ export function App() {
   const me = useMe()
   const { data: sessions = [] } = useSessions(!me.isError)
   const { data: credit } = useCredit(!me.isError)
-  const { view, busy } = useConversation()
+  const { view, busy, loadingExistingTask } = useConversation()
   const send = useSendMessage()
 
   const taskId = useAtomValue(taskIdAtom)
@@ -111,8 +111,10 @@ export function App() {
         />
         <main className="main">
           <ChatPanel
+            sessionKey={taskId}
             chat={view.chat}
             busy={busy}
+            loading={loadingExistingTask}
             onPick={pickSuggestion}
             onBook={selectOption}
             fareLatest={view.fare}

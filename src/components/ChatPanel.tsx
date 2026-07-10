@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { ChatBubble, FareVerification } from '../frames.ts'
 import { parseTs, shortStamp, fullStamp } from '../lib/time.ts'
@@ -31,8 +31,10 @@ const SUGGESTIONS = [
 ]
 
 export function ChatPanel({
+  sessionKey,
   chat,
   busy,
+  loading,
   onPick,
   onBook,
   fareLatest,
@@ -40,8 +42,10 @@ export function ChatPanel({
   notice,
   children,
 }: {
+  sessionKey: string | null
   chat: ChatBubble[]
   busy: boolean
+  loading: boolean
   onPick: (text: string) => void
   onBook: (label: string) => void
   /** The current verified fare (DerivedView.fare). The inline verify card whose `b.fare` is this
@@ -55,12 +59,25 @@ export function ChatPanel({
   children?: ReactNode
 }) {
   const endRef = useRef<HTMLDivElement>(null)
+  const sessionRef = useRef<string | null>(sessionKey)
+  const needsInstantScrollRef = useRef(false)
   const [lightbox, setLightbox] = useState<string | null>(null)
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [chat.length, busy, !!children])
+  useLayoutEffect(() => {
+    if (sessionRef.current !== sessionKey) {
+      sessionRef.current = sessionKey
+      needsInstantScrollRef.current = !!sessionKey
+    }
+    if (loading || (!chat.length && !busy && !children)) return
+    const behavior = needsInstantScrollRef.current ? 'auto' : 'smooth'
+    needsInstantScrollRef.current = false
+    endRef.current?.scrollIntoView({ behavior, block: 'end' })
+  }, [sessionKey, chat.length, busy, !!children, loading])
 
   return (
     <div className="chat">
-      {chat.length === 0 ? (
+      {loading ? (
+        <div className="chat-loading" aria-busy="true">正在加载会话…</div>
+      ) : chat.length === 0 ? (
         <div className="chat-welcome">
           <h1>Kitty</h1>
           <p className="muted">订票工作台</p>
