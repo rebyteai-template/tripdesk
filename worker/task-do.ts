@@ -80,9 +80,12 @@ interface TurnState {
    *  The status flips a beat before finalResult populates, so we drain a few more
    *  windows to catch the tail before finalizing. */
   terminalDrains: number
-  /** Sub-session prompt ids whose delegated domain-tool events we've already
-   *  pulled + replayed into this prompt's frames (so we fetch each once). */
-  fetchedSubPrompts: string[]
+  /** Per delegated sub-session prompt id → how many of its events we've already
+   *  replayed into this prompt's frames. We re-fetch each window and replay only
+   *  the NEW events: the relay can persist a sub-session's search-result compact a
+   *  beat AFTER the delegation result signals done, so a one-shot replay (the old
+   *  behavior) raced and dropped the flight card in prod. Cursor = idempotent catch-up. */
+  subPromptCursors: Record<string, number>
   deadline: number
   /** Absolute cap — even an alive relay can't run the turn past this. */
   hardDeadline: number
@@ -176,8 +179,8 @@ export class TaskDO extends DurableObject<Env> {
         // travelkit tool_use/tool_result and replay those into THIS prompt's frames so
         // the bench cards populate. frames.ts already routes by tool name — no change there.
         const subPromptId = typeof p.subPromptId === 'string' ? p.subPromptId : ''
-        if (subPromptId && !t.fetchedSubPrompts.includes(subPromptId)) {
-          t.fetchedSubPrompts.push(subPromptId)
+        if (subPromptId) {
+          if (!(subPromptId in t.subPromptCursors)) t.subPromptCursors[subPromptId] = 0
           await this.replaySubPrompt(t, subPromptId)
         }
         return
@@ -196,6 +199,9 @@ export class TaskDO extends DurableObject<Env> {
    *  delegation's tool_result has already arrived, so the sub-session is terminal and
    *  its GCS events are flushed. Only tool frames matter to the bench; text/thinking
    *  from the sub-agent stay internal (the manager's own summary is the chat answer). */
+  /** Replay a delegated sub-session's tool_use/tool_result into this prompt's frames,
+   *  resuming from the cursor so re-calls each window only emit NEW events (the search
+   *  compact often persists after the delegation result, so we must re-fetch). */
   private async replaySubPrompt(t: TurnState, subPromptId: string): Promise<void> {
     if (!t.relayTaskId) return
     const data = await rebyteJSON<{ events?: RelayEvent[] }>(
@@ -203,10 +209,20 @@ export class TaskDO extends DurableObject<Env> {
       { config: this.rebyteConfig() },
     ).catch(() => null)
     if (!data?.events?.length) return
-    for (const ev of data.events) {
+    const start = t.subPromptCursors[subPromptId] ?? 0
+    if (data.events.length <= start) return
+    for (const ev of data.events.slice(start)) {
       const type = String(ev.eventType ?? '')
-      if (type !== 'tool_use' && type !== 'tool_result') continue
-      await this.translate(t, ev)
+      if (type === 'tool_use' || type === 'tool_result') await this.translate(t, ev)
+    }
+    t.subPromptCursors[subPromptId] = data.events.length
+  }
+
+  /** Re-pull every known delegated sub-session so late-persisted events (esp. the
+   *  flight search compact) reach the frames. Idempotent via the per-sub cursor. */
+  private async catchUpSubPrompts(t: TurnState): Promise<void> {
+    for (const subPromptId of Object.keys(t.subPromptCursors)) {
+      await this.replaySubPrompt(t, subPromptId)
     }
   }
 
@@ -297,7 +313,7 @@ export class TaskDO extends DurableObject<Env> {
       sawText: false,
       emittedText: '',
       terminalDrains: 0,
-      fetchedSubPrompts: [],
+      subPromptCursors: {},
       deadline: Date.now() + TURN_TIMEOUT_MS,
       hardDeadline: Date.now() + TURN_HARD_CAP_MS,
       errors: 0,
@@ -458,6 +474,9 @@ export class TaskDO extends DurableObject<Env> {
 
       const done = await this.streamWindow(t, config)
       t.errors = 0 // the window ran — whatever failed before, the relay is reachable again
+      // Re-pull delegated sub-sessions every window before we might finalize: their search
+      // compact can land after the delegation result, and a one-shot replay dropped it (no card).
+      await this.catchUpSubPrompts(t)
       if (done.terminal) {
         if (done.finalResult) await this.emitTurnText(t, done.finalResult, true)
         return this.finalize(t, this.mapStatus(done.status ?? 'completed'))
