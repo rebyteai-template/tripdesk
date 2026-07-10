@@ -190,6 +190,108 @@ test('derive does not render the last fare card when a turn verifies multiple al
   assert.match(view.chat.at(-1)?.text ?? '', /\| WN \| ¥3978 \|/)
 })
 
+function compactCombo(optionNumber: number, amount: number, legs: Array<{ flightNo: string; from: string; to: string; date: string; time: string }>) {
+  return {
+    ok: true,
+    searchedRequests: [{ uniqueCandidateCount: 1 }],
+    displayOptions: [
+      {
+        optionNumber,
+        solutionId: `combo:${legs.map((l) => l.flightNo).join('-').toLowerCase()}`,
+        journeyType: '多程',
+        duration: '30h',
+        durationMinutes: 1800,
+        cabin: '经济',
+        baggage: '托运1*23kg',
+        hasCheckedBaggage: true,
+        price: { amount, currency: 'CNY', display: `¥${amount}`, perType: { adult: { num: 3, unitTotal: Math.round(amount / 3), subtotal: amount } } },
+        journeys: legs.map((l) => ({
+          origin: l.from,
+          destination: l.to,
+          departureDate: l.date,
+          departureTime: l.time,
+          arrivalDate: l.date,
+          arrivalTime: l.time,
+          duration: '5h',
+          transferCount: 0,
+          segments: [
+            {
+              flightNo: l.flightNo,
+              departure: l.from,
+              departureDate: l.date,
+              departureTime: l.time,
+              arrival: l.to,
+              arrivalDate: l.date,
+              arrivalTime: l.time,
+              cabin: '经济',
+            },
+          ],
+        })),
+      },
+    ],
+    displayMapping: { 1: {} },
+  }
+}
+
+test('two multi-leg searches sharing a first leg both render (no signature collision)', () => {
+  // Both option-1 start MU0583; only the later legs differ. The old first-flight-only
+  // signature collided and dropped the second table — the full-itinerary signature keeps both.
+  const first = compactCombo(1, 45900, [
+    { flightNo: 'MU0583', from: 'PVG', to: 'LAX', date: '2026-09-27', time: '13:10' },
+    { flightNo: 'DL1194', from: 'LAX', to: 'SLC', date: '2026-09-29', time: '11:34' },
+  ])
+  const second = compactCombo(1, 46200, [
+    { flightNo: 'MU0583', from: 'PVG', to: 'LAX', date: '2026-09-27', time: '13:10' },
+    { flightNo: 'WN3888', from: 'LAX', to: 'SLC', date: '2026-09-29', time: '06:00' },
+  ])
+  const prompt = promptWithToolResult('')
+  prompt.frames = [
+    { seq: 1, data: { type: 'user', message: { content: [{ type: 'tool_result', content: JSON.stringify(first) }] } } },
+    { seq: 2, data: { type: 'user', message: { content: [{ type: 'tool_result', content: JSON.stringify(second) }] } } },
+  ]
+
+  const cardBubbles = derive([prompt]).chat.filter((b) => b.cards)
+  assert.equal(cardBubbles.length, 2)
+  assert.equal(cardBubbles[0]?.cards?.[0]?.journeys[1]?.segments[0]?.flightNo, 'DL1194')
+  assert.equal(cardBubbles[1]?.cards?.[0]?.journeys[1]?.segments[0]?.flightNo, 'WN3888')
+})
+
+test('an identical compact re-read in a later frame is de-duplicated', () => {
+  // The verify turn re-reads the same search compact; that exact repeat must not render twice.
+  const same = compactCombo(1, 45900, [
+    { flightNo: 'MU0583', from: 'PVG', to: 'LAX', date: '2026-09-27', time: '13:10' },
+    { flightNo: 'DL1194', from: 'LAX', to: 'SLC', date: '2026-09-29', time: '11:34' },
+  ])
+  const prompt = promptWithToolResult('')
+  prompt.frames = [
+    { seq: 1, data: { type: 'user', message: { content: [{ type: 'tool_result', content: JSON.stringify(same) }] } } },
+    { seq: 2, data: { type: 'user', message: { content: [{ type: 'tool_result', content: JSON.stringify(same) }] } } },
+  ]
+
+  assert.equal(derive([prompt]).chat.filter((b) => b.cards).length, 1)
+})
+
+test('a 2-journey round-trip compact renders one card with both legs', () => {
+  const rt = compactCombo(1, 15200, [
+    { flightNo: 'CA0841', from: 'PEK', to: 'VIE', date: '2026-09-06', time: '02:55' },
+    { flightNo: 'CA0842', from: 'VIE', to: 'PEK', date: '2026-09-12', time: '13:30' },
+  ])
+  const view = derive([promptWithToolResult(JSON.stringify(rt))])
+  const card = view.chat.filter((b) => b.cards).at(0)?.cards?.[0]
+  if (!card) throw new Error('expected a card')
+  assert.equal(card.journeys.length, 2)
+  assert.equal(card.journeys[0]?.segments[0]?.flightNo, 'CA0841')
+  assert.equal(card.journeys[1]?.segments[0]?.flightNo, 'CA0842')
+})
+
+test('a truncated compact search does not crash derive or render a card', () => {
+  // Passes the substring gate ("displayOptions"+"displayMapping") but is not valid JSON.
+  const truncated = '{"ok":true,"displayMapping":{},"displayOptions":[{"optionNumber":1,"price":{"amount":100'
+  const view = derive([promptWithToolResult(truncated)])
+  assert.notEqual(view.stage, 'search')
+  assert.equal(view.chat.filter((b) => b.cards).length, 0)
+})
+
 test('assistant text keys are unique across prompts with the same frame seq', () => {
   const first = promptWithToolResult('')
   first.id = 'prompt-a'

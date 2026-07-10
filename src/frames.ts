@@ -285,7 +285,12 @@ export function derive(prompts: PromptContent[]): DerivedView {
             const parsed = payload && parseCompactSearch(payload)
             if (parsed) {
               search = parsed; fare = null; notice = null; stage = 'search'
-              const sig = parsed.options.map((o) => `${o.optionNumber}:${o.price.amount}:${o.journeys[0]?.segments[0]?.flightNo ?? ''}`).join('|')
+              // Signature covers every option's full itinerary (all legs, all segments, dates), not
+              // just the first flight — otherwise two different multi-leg searches that share a first
+              // leg (e.g. both start MU0583) collide and the second table is silently dropped.
+              const sig = parsed.options
+                .map((o) => `${o.optionNumber}:${o.price.amount}:${o.journeys.map((j) => j.segments.map((s) => `${s.flightNo}@${s.departureDate}`).join('+')).join('>')}`)
+                .join('|')
               if (sig !== lastCardsSig) {
                 pendingSearches.push(parsed)
                 lastCardsSig = sig

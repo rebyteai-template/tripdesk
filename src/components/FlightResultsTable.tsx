@@ -58,21 +58,6 @@ function durationCell(j: CompactJourney): string {
   return `${j.duration}${layover}`
 }
 
-function recommendedFlights(text: string): Set<string> {
-  const set = new Set<string>()
-  const re = /推荐\s*([A-Z0-9]{2}\d{3,4})/gi
-  let match: RegExpExecArray | null
-  while ((match = re.exec(text))) {
-    const flightNo = match[1]
-    if (flightNo) set.add(flightNo.toUpperCase())
-  }
-  return set
-}
-
-function optionFlights(o: CompactOption): string[] {
-  return o.journeys.flatMap((j) => j.segments.map((s) => s.flightNo.toUpperCase()))
-}
-
 function optionBadges(o: CompactOption, isRecommended: boolean): string[] {
   const tags = new Set<string>()
   if (isRecommended) tags.add('推荐')
@@ -265,24 +250,22 @@ async function writeClipboard(text: string): Promise<void> {
 export function FlightResultsTable({
   options,
   totalCount,
-  contextText = '',
   onBook,
   busy,
 }: {
   options: CompactOption[]
   totalCount?: number
-  contextText?: string
   onBook: (prompt: string) => void
   busy: boolean
 }) {
   const [copied, setCopied] = useState<string | null>(null)
   const showTotal = useMemo(() => options.some((o) => o.journeys.length > 2), [options])
   const groups = useMemo(() => groupBySection(options), [options])
-  const recommended = useMemo(() => recommendedFlights(contextText), [contextText])
-  const recommendedOptions = useMemo(() => options.filter((o) => {
-    const tagged = /推荐|综合/.test(o.tag ?? '')
-    return tagged || optionFlights(o).some((flightNo) => recommended.has(flightNo))
-  }), [options, recommended])
+  // The skill tags its own picks (最低价 / 直飞最快 / 综合推荐); highlight those.
+  const recommendedOptions = useMemo(
+    () => options.filter((o) => /推荐|综合/.test(o.tag ?? '')),
+    [options],
+  )
   const rowsByGroup = useMemo(() =>
     groups.map((group) => ({ ...group, rows: buildRows(group.options, recommendedOptions) })),
   [groups, recommendedOptions])
