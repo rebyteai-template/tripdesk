@@ -17,14 +17,17 @@ import { useTaskContent } from './useTaskContent.ts'
 export function useConversation() {
   const qc = useQueryClient()
   const taskId = useAtomValue(taskIdAtom)
-  const { data } = useTaskContent(taskId)
+  const { data, isPending } = useTaskContent(taskId)
   const hydrate = useSetAtom(hydrateTurnsAtom)
   const turns = useAtomValue(currentTurnsAtom)
   const busy = useAtomValue(currentBusyAtom)
+  const taskData = data?.task.id === taskId ? data : null
+  const taskMissing = data === null
+  const loadingExistingTask = !!taskId && !turns.length && !taskMissing && (!taskData || isPending)
 
   useEffect(() => {
-    if (taskId && data?.prompts) hydrate({ taskId, prompts: data.prompts })
-  }, [taskId, data, hydrate])
+    if (taskId && taskData?.prompts) hydrate({ taskId, prompts: taskData.prompts })
+  }, [taskId, taskData, hydrate])
 
   // Reload / deep-link reattach: if the latest turn is still running server-side (the user
   // refreshed mid-turn, or the long SSE got dropped), re-join its stream from the frames we just
@@ -32,14 +35,14 @@ export function useConversation() {
   // refresh, and the per-task busy guard is restored. attachStream is idempotent per promptId, so
   // this never doubles send()'s own stream for a turn started in this same tab.
   useEffect(() => {
-    const prompts = data?.prompts
+    const prompts = taskData?.prompts
     if (!taskId || !prompts?.length) return
     const last = prompts[prompts.length - 1]
     if (!last || last.status !== 'running') return
     const fromSeq = last.frames.reduce((m, f) => (f.seq > m ? f.seq : m), 0)
     attachStream(qc, taskId, last.id, fromSeq)
-  }, [taskId, data, qc])
+  }, [taskId, taskData, qc])
 
   const view = useMemo(() => derive(turns), [turns])
-  return { view, busy }
+  return { view, busy, loadingExistingTask }
 }

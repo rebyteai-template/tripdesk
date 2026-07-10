@@ -143,6 +143,7 @@ body {
 .chat { flex: 1; overflow: auto; padding: 22px clamp(20px, 3vw, 36px); display: flex; flex-direction: column; gap: 12px; width: 100%; max-width: 1280px; margin: 0 auto; }
 .chat-welcome { color: var(--muted); margin-top: 12px; }
 .chat-welcome h1 { color: var(--text); margin: 0 0 4px; font-size: 22px; font-family: 'Newsreader', Georgia, 'Source Han Serif SC', serif; font-weight: 500; }
+.chat-loading { align-self: flex-start; color: var(--muted); font-size: 13px; padding: 10px 4px; }
 /* cold-start quick actions — one tap fills the composer (editable) */
 .suggestions { display: flex; flex-direction: column; gap: 8px; margin-top: 16px; max-width: 440px; }
 .suggestion {

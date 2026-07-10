@@ -189,3 +189,34 @@ test('derive does not render the last fare card when a turn verifies multiple al
   assert.equal(view.chat.some((b) => b.fare), false)
   assert.match(view.chat.at(-1)?.text ?? '', /\| WN \| ¥3978 \|/)
 })
+
+test('assistant text keys are unique across prompts with the same frame seq', () => {
+  const first = promptWithToolResult('')
+  first.id = 'prompt-a'
+  first.prompt = 'first'
+  first.frames = [
+    {
+      seq: 8,
+      data: {
+        type: 'assistant',
+        message: { content: [{ type: 'text', text: 'first answer' }] },
+      },
+    },
+  ]
+
+  const second = promptWithToolResult('')
+  second.id = 'prompt-b'
+  second.prompt = 'second'
+  second.frames = [
+    {
+      seq: 8,
+      data: {
+        type: 'assistant',
+        message: { content: [{ type: 'text', text: 'second answer' }] },
+      },
+    },
+  ]
+
+  const keys = derive([first, second]).chat.map((b) => b.key)
+  assert.equal(new Set(keys).size, keys.length)
+})

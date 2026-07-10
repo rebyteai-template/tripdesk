@@ -1,12 +1,44 @@
 import { atom } from 'jotai'
 import { atomWithStorage } from 'jotai/utils'
 import type { PassengerDraft } from '../booking.ts'
+import { TENANT_ID } from '../api.ts'
 
 // The current session lives in the URL (?t=…) so refresh / deep-link restores it.
 // Identity comes from the embed handoff, so a session belongs to a tenant, not a tab.
+const LAST_TASK_KEY_PREFIX = 'tripdesk-last-task-v1'
+
 function readUrlTaskId(): string | null {
   return new URLSearchParams(location.search).get('t')
 }
+
+function lastTaskKey(): string | null {
+  return TENANT_ID ? `${LAST_TASK_KEY_PREFIX}-${TENANT_ID}` : null
+}
+
+function readLastTaskId(): string | null {
+  const key = lastTaskKey()
+  if (!key) return null
+  try {
+    return localStorage.getItem(key) || null
+  } catch {
+    return null
+  }
+}
+
+function rememberLastTaskId(id: string): void {
+  const key = lastTaskKey()
+  if (!key) return
+  try {
+    localStorage.setItem(key, id)
+  } catch {
+    /* ignore */
+  }
+}
+
+function readInitialTaskId(): string | null {
+  return readUrlTaskId() ?? readLastTaskId()
+}
+
 function writeUrlTaskId(id: string | null): void {
   const u = new URL(location.href)
   if (id) u.searchParams.set('t', id)
@@ -14,13 +46,14 @@ function writeUrlTaskId(id: string | null): void {
   history.replaceState(null, '', u)
 }
 
-const _taskIdAtom = atom<string | null>(readUrlTaskId())
+const _taskIdAtom = atom<string | null>(readInitialTaskId())
 /** Current session id. Reads are plain; writes also mirror to the URL (?t=). */
 export const taskIdAtom = atom(
   (get) => get(_taskIdAtom),
   (_get, set, id: string | null) => {
     set(_taskIdAtom, id)
     writeUrlTaskId(id)
+    if (id) rememberLastTaskId(id)
   },
 )
 
