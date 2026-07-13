@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { buildRows, buildVerifyPrompt } from '../src/components/FlightResultsTable.tsx'
+import { buildRows, buildVerifyPrompt, optionActionLabel } from '../src/components/FlightResultsTable.tsx'
 import type { CompactOption } from '../src/frames.ts'
 
 const option: CompactOption = {
@@ -55,6 +55,19 @@ test('buildVerifyPrompt binds verify to solutionId and includes row facts', () =
   assert.match(prompt, /MU5186 2026-08-05 PEKSHA 07:45-10:05 经济 H舱/)
   assert.match(prompt, /expected displayed price: ¥1,280/)
   assert.doesNotMatch(prompt, /表格序号|displayNumber/)
+})
+
+test('freshly verified search rows are marked verified and use a select action', () => {
+  const verified: CompactOption = {
+    ...option,
+    verifiedAt: '2026-08-05T00:00:00.000Z',
+    priceBasis: 'verified',
+  }
+  const rows = buildRows([verified], [])
+  assert.ok(rows[0]!.badges.includes('已验价'))
+  assert.equal(optionActionLabel(verified), '选择')
+  assert.equal(optionActionLabel(option), '验价')
+  assert.match(buildVerifyPrompt(verified), /优先复用本次搜索刚保存的验价结果/)
 })
 
 const comboLeg = (flightNo: string, from: string, to: string, date: string) => ({

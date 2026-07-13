@@ -76,13 +76,36 @@ function compactSearch(optionNumber: number, flightNo: string, amount: number) {
 
 test('derive parses compact search JSON before trailing shell output', () => {
   const compact = compactSearch(1, 'MU5186', 1000)
+  const rawOption = compact.displayOptions[0] as unknown as Record<string, unknown>
+  rawOption.verifiedAt = '2026-08-05T00:00:00.000Z'
+  rawOption.priceBasis = 'verified'
 
   const view = derive([promptWithToolResult(`${JSON.stringify(compact)}\nShell cwd was reset to /code\n`)])
   assert.equal(view.stage, 'search')
   assert.equal(view.search?.options.length, 1)
   assert.equal(view.search?.options[0]?.solutionId, 'sol-mu5186')
+  assert.equal(view.search?.options[0]?.priceBasis, 'verified')
   assert.equal(view.search?.options[0]?.blocks, undefined)
   assert.equal(view.chat.at(-1)?.cards?.length, 1)
+})
+
+test('a shape-valid empty search clears the current result and uses the aggregate count', () => {
+  const populated = promptWithToolResult(JSON.stringify(compactSearch(1, 'MU5186', 1000)))
+  populated.id = 'populated'
+  const emptyPayload = {
+    ...compactSearch(1, 'MU5186', 1000),
+    displayOptions: [],
+    displayMapping: {},
+    searchedRequests: [{ uniqueCandidateCount: 1 }],
+    summary: { afterFilters: 7 },
+  }
+  const cleared = promptWithToolResult(JSON.stringify(emptyPayload))
+  cleared.id = 'cleared'
+
+  const view = derive([populated, cleared])
+  assert.equal(view.stage, 'search')
+  assert.deepEqual(view.search?.options, [])
+  assert.equal(view.search?.totalCount, 7)
 })
 
 test('derive parses combo blocks (per-ticket price/source) and journey blockIndex', () => {

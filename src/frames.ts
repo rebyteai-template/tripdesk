@@ -17,8 +17,9 @@ import type { Attachment, PromptContent } from './api.ts'
 // is the COMPACT JSON (flight_search_compact.py stdout), replayed into our frames from
 // the sub-session. `displayOptions` = the skill's curated recommendations, each fully
 // structured, including solutionId for exact verify. `displayMapping` stays unused.
-// Cards mirror whatever the skill recommended — the real
-// filtering/refinement ("拉扯") happens conversationally in chat.
+// Cards mirror the skill's deterministic, already-filtered recommendations;
+// conversational refinement changes the constraints and asks the skill to run
+// the same pipeline again.
 export interface CompactSegment {
   flightNo: string
   opFlightNo?: string
@@ -63,6 +64,8 @@ export interface CompactOption {
   searchGroupIndex?: number // 1-based order when multiple compact searches are merged into one table
   section?: string
   tag?: string | null
+  verifiedAt?: string
+  priceBasis?: 'search' | 'pricing' | 'verified'
   journeyType: string      // "单程直飞" | "单程中转N次" | "多程"
   duration: string         // "2h10m"
   durationMinutes: number
@@ -424,9 +427,15 @@ function parseCompactSearch(json: Record<string, unknown>): SearchResult | null 
     const o = toCompactOption(raw)
     if (o) options.push(o)
   }
-  if (!options.length) return null
+  // A shape-valid empty result is meaningful: all candidates may have failed
+  // verification. Keep it so a fresh empty search clears any stale table.
+  const summary = isObj(json.summary) ? json.summary : null
   const sr = Array.isArray(json.searchedRequests) && isObj(json.searchedRequests[0]) ? json.searchedRequests[0] : null
-  const totalCount = sr && typeof sr.uniqueCandidateCount === 'number' ? sr.uniqueCandidateCount : undefined
+  const totalCount = summary && typeof summary.afterFilters === 'number'
+    ? summary.afterFilters
+    : sr && typeof sr.uniqueCandidateCount === 'number'
+      ? sr.uniqueCandidateCount
+      : undefined
   return { options, totalCount }
 }
 
@@ -490,6 +499,10 @@ function toCompactOption(raw: unknown): CompactOption | null {
     solutionId: str(raw.solutionId) || undefined,
     section: str(raw.section) || undefined,
     tag: str(raw.tag) || null,
+    verifiedAt: str(raw.verifiedAt) || undefined,
+    priceBasis: raw.priceBasis === 'search' || raw.priceBasis === 'pricing' || raw.priceBasis === 'verified'
+      ? raw.priceBasis
+      : undefined,
     journeyType: str(raw.journeyType),
     duration: str(raw.duration),
     durationMinutes: num(raw.durationMinutes),

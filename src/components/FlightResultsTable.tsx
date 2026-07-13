@@ -103,8 +103,13 @@ function durationCell(j: CompactJourney): string {
 function optionBadges(o: CompactOption, isRecommended: boolean): string[] {
   const tags = new Set<string>()
   if (isRecommended) tags.add('推荐')
+  if (o.priceBasis === 'verified') tags.add('已验价')
   if (o.tag) tags.add(o.tag)
   return [...tags]
+}
+
+export function optionActionLabel(o: CompactOption): string {
+  return o.priceBasis === 'verified' ? '选择' : '验价'
 }
 
 function optionSummary(o: CompactOption): string {
@@ -141,7 +146,9 @@ export function buildVerifyPrompt(o: CompactOption): string {
     ? '请使用 simplifly-flyai-skill verify --solution-id 核验这个 solutionId 的实时价格和可售性。'
     : '请使用 simplifly-flyai-skill verify 核验这个方案的实时价格和可售性。'
   return [
-    '请对以下方案做实时验价。',
+    o.priceBasis === 'verified'
+      ? '请选择以下已验价方案，优先复用本次搜索刚保存的验价结果进入下一步；仅在结果已过期时重新请求供应商。'
+      : '请对以下方案做实时验价。',
     '',
     'selection:',
     selection,
@@ -387,7 +394,7 @@ export function FlightResultsTable({
                     <td>
                       {row.optionNumber ? (
                         <div className="flight-actions">
-                          <button type="button" disabled={busy} onClick={() => onBook(buildVerifyPrompt(row.option))}>验价</button>
+                          <button type="button" disabled={busy} onClick={() => onBook(buildVerifyPrompt(row.option))}>{optionActionLabel(row.option)}</button>
                           <button type="button" disabled={!copyTextOf(row.option)} onClick={() => onCopy(row.option)}>{copied === row.optionKey ? '已复制' : '复制'}</button>
                         </div>
                       ) : null}
