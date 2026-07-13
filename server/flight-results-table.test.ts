@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { buildVerifyPrompt } from '../src/components/FlightResultsTable.tsx'
+import { buildRows, buildVerifyPrompt } from '../src/components/FlightResultsTable.tsx'
 import type { CompactOption } from '../src/frames.ts'
 
 const option: CompactOption = {
@@ -17,7 +17,6 @@ const option: CompactOption = {
   price: {
     amount: 1280,
     currency: 'CNY',
-    display: '¥1,280',
     perType: { adult: { num: 2, unitTotal: 640, subtotal: 1280 } },
   },
   journeys: [
@@ -81,7 +80,7 @@ const comboOption: CompactOption = {
   cabin: '经济',
   baggage: '托运1*23kg',
   hasCheckedBaggage: true,
-  price: { amount: 46071, currency: 'CNY', display: '¥46,071', perType: { adult: { num: 3, unitTotal: 15357, subtotal: 46071 } } },
+  price: { amount: 46071, currency: 'CNY', perType: { adult: { num: 3, unitTotal: 15357, subtotal: 46071 } } },
   journeys: [
     comboLeg('MU0583', 'PVG', 'LAX', '2026-09-27'),
     comboLeg('DL1194', 'LAX', 'SLC', '2026-09-29'),
@@ -100,4 +99,51 @@ test('buildVerifyPrompt on a 4-leg combo binds the combo solutionId and lists ev
     assert.match(prompt, new RegExp(flightNo))
   }
   assert.match(prompt, /expected displayed price: ¥46,071/)
+})
+
+test('combo rows show each ticket price/source on its block first row and the sum as 总价', () => {
+  const combo: CompactOption = {
+    ...comboOption,
+    journeys: comboOption.journeys.map((j, i) => ({ ...j, blockIndex: i })),
+    blocks: [
+      { price: { amount: 20000, currency: 'CNY' }, source: '美亚' },
+      { price: { amount: 1050, currency: 'CNY' }, source: 'yinling' },
+      { price: { amount: 2658, currency: 'CNY' }, source: 'yinling' },
+      { price: { amount: 22363, currency: 'CNY' } },
+    ],
+  }
+
+  const rows = buildRows([combo], [])
+  assert.equal(rows.length, 4)
+  assert.deepEqual(rows.map((r) => r.price), ['¥20,000', '¥1,050', '¥2,658', '¥22,363'])
+  assert.deepEqual(rows.map((r) => r.source), ['美亚', 'yinling', 'yinling', '--'])
+  assert.deepEqual(rows.map((r) => r.total), ['¥46,071', '', '', ''])
+})
+
+test('a jointly-booked block (two journeys, one ticket) prices only its first row', () => {
+  const combo: CompactOption = {
+    ...comboOption,
+    journeys: [
+      { ...comboLeg('MU0583', 'PVG', 'LAX', '2026-09-27'), blockIndex: 0 },
+      { ...comboLeg('MU0588', 'JFK', 'PVG', '2026-10-07'), blockIndex: 0 },
+      { ...comboLeg('DL1194', 'LAX', 'SLC', '2026-09-29'), blockIndex: 1 },
+    ],
+    blocks: [
+      { price: { amount: 45000, currency: 'CNY' }, source: '美亚' },
+      { price: { amount: 1071, currency: 'CNY' }, source: 'yinling' },
+    ],
+  }
+
+  const rows = buildRows([combo], [])
+  assert.deepEqual(rows.map((r) => r.price), ['¥45,000', '', '¥1,071'])
+  assert.deepEqual(rows.map((r) => r.source), ['美亚', '', 'yinling'])
+  assert.deepEqual(rows.map((r) => r.total), ['¥46,071', '', ''])
+})
+
+test('a single-ticket option keeps its price on the first row and no per-block split', () => {
+  const rows = buildRows([option], [])
+  assert.equal(rows.length, 1)
+  assert.equal(rows[0]?.price, '¥1,280')
+  assert.equal(rows[0]?.total, '¥1,280')
+  assert.equal(rows[0]?.source, '--')
 })

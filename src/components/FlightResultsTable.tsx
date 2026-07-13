@@ -1,30 +1,25 @@
 import { useMemo, useState } from 'react'
 import type { CompactJourney, CompactOption, CompactSegment } from '../frames.ts'
-import { paxLabel, stopsLabel } from '../booking.ts'
+import { stopsLabel } from '../booking.ts'
+
+/** Shown whenever upstream data is missing. The table never substitutes data
+ *  from another level or invents text — gaps stay visible so they get fixed
+ *  at the source (skill/API), not papered over here. */
+const NO_DATA = '--'
 
 function dateCn(iso: string): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso)
   return m ? `${Number(m[2])}月${m[3]}日` : iso
 }
 
-function money(amount: number, currency = 'CNY'): string {
+function money(amount: number, currency: string): string {
+  if (!Number.isFinite(amount) || amount <= 0 || !currency) return NO_DATA
   const prefix = currency.toUpperCase() === 'CNY' ? '¥' : `${currency} `
   return `${prefix}${amount.toLocaleString('zh-CN')}`
 }
 
-function priceDisplay(o: CompactOption): string {
-  if (o.price.display && o.price.display !== '¥0') return o.price.display
+function optionPrice(o: CompactOption): string {
   return money(o.price.amount, o.price.currency)
-}
-
-function customerPrice(o: CompactOption): string {
-  const entries = Object.entries(o.price.perType ?? {})
-  if (!entries.length) return `价格：${priceDisplay(o)} 含税/人`
-  const parts = entries.map(([type, p]) => {
-    const unit = p.unitTotal ?? (p.num ? (p.subtotal ?? 0) / p.num : 0)
-    return `${paxLabel(type)} ${money(unit, o.price.currency)} 含税/人`
-  })
-  return `价格：${parts.join('，')}`
 }
 
 function airportName(code: string, name?: string, terminal?: string): string {
@@ -69,7 +64,7 @@ function optionSummary(o: CompactOption): string {
   const firstJourney = o.journeys[0]
   const firstSegment = firstJourney?.segments[0]
   if (!firstJourney || !firstSegment) return `方案 ${o.displayNumber ?? o.optionNumber}`
-  return `方案 ${o.displayNumber ?? o.optionNumber} · ${firstSegment.flightNo} · ${timeCell(firstJourney, firstSegment)} · ${priceDisplay(o)}`
+  return `方案 ${o.displayNumber ?? o.optionNumber} · ${firstSegment.flightNo} · ${timeCell(firstJourney, firstSegment)} · ${optionPrice(o)}`
 }
 
 function passengerCountForPrompt(o: CompactOption): string {
@@ -86,8 +81,8 @@ export function buildVerifyPrompt(o: CompactOption): string {
   const selector = o.selectionLabel ?? `原始方案${o.optionNumber}`
   const checks = o.journeys.flatMap((journey, ji) =>
     journey.segments.map((segment) => {
-      const label = o.journeys.length > 1 ? `${ji === 0 ? '去程' : ji === 1 ? '回程' : `第${ji + 1}程`}` : ''
-      return `${label}${segment.flightNo} ${segment.departureDate} ${segment.departure}${segment.arrival} ${segment.departureTime}-${segment.arrivalTime} ${segment.cabin}`
+      const label = o.journeys.length > 1 ? (isRoundTrip(o) ? (ji === 0 ? '去程' : '回程') : `第${ji + 1}程`) : ''
+      return `${label}${segment.flightNo} ${segment.departureDate} ${segment.departure}${segment.arrival} ${segment.departureTime}-${segment.arrivalTime} ${segment.cabin || NO_DATA}`
     }),
   )
   const selection = o.solutionId
@@ -107,47 +102,31 @@ export function buildVerifyPrompt(o: CompactOption): string {
     'expected itinerary:',
     ...checks.map((check) => `- ${check}`),
     '',
-    `expected displayed price: ${priceDisplay(o)}`,
+    `expected displayed price: ${optionPrice(o)}`,
     '',
     `${verifyCommand} 验价成功后返回价格、舱位、行李是否变化；不要下单。`,
   ].filter(Boolean).join('\n')
 }
 
+// 去程/回程 only fits a true round trip (second journey mirrors the first);
+// a composed pair of unrelated one-ways (SHA→LAX + LAX→SLC) is 第1程/第2程.
+function isRoundTrip(o: CompactOption): boolean {
+  const [outbound, inbound] = o.journeys
+  if (o.journeys.length !== 2 || !outbound || !inbound) return false
+  return outbound.origin === inbound.destination && outbound.destination === inbound.origin
+}
+
 function journeyLabel(o: CompactOption, j: CompactJourney, index: number): string {
   const stops = stopsLabel(j.transferCount)
   if (o.journeys.length === 1) return stops
-  if (o.journeys.length === 2) return `${index === 0 ? '去程' : '回程'}${stops}`
+  if (isRoundTrip(o)) return `${index === 0 ? '去程' : '回程'}${stops}`
   return `第${index + 1}程${stops}`
 }
 
-function baggageForCopy(o: CompactOption): string {
-  const byJourney = o.journeys.map((j, i) => {
-    const bags = [...new Set(j.segments.map((s) => s.checkedBaggage).filter((x): x is string => Boolean(x)))]
-    const bag = bags.join('，') || o.baggage || '未返回'
-    if (o.journeys.length === 1) return bag
-    const label = o.journeys.length === 2 ? (i === 0 ? '去程' : '回程') : `第${i + 1}程`
-    return `${label}${bag}`
-  })
-  return `行李：${byJourney.join('，')}`
-}
-
-function copyText(o: CompactOption): string {
-  const supplied = o.copyText?.trim()
-  if (supplied) return supplied
-  const lines: string[] = []
-  let n = 1
-  for (const journey of o.journeys) {
-    for (const segment of journey.segments) {
-      const plus = crossDays(journey, segment)
-      lines.push(`${n}. ${segment.flightNo}  ${dateCn(segment.departureDate)}  ${segment.departure}${segment.arrival}  ${airportName(segment.departure, segment.departureName, segment.departureTerminal)} → ${airportName(segment.arrival, segment.arrivalName, segment.arrivalTerminal)}  ${segment.departureTime} - ${segment.arrivalTime}${plus ? `+${plus}` : ''}---${segment.cabin}`)
-      n += 1
-    }
-  }
-  lines.push(customerPrice(o))
-  lines.push(baggageForCopy(o))
-  lines.push('改期：未返回')
-  lines.push('退票：未返回')
-  return lines.join('\n')
+// Customer copy comes from the skill verbatim (quote --copy-text contract);
+// the UI never assembles its own version. No copyText → the copy button is disabled.
+function copyTextOf(o: CompactOption): string {
+  return o.copyText?.trim() ?? ''
 }
 
 interface FlightTableRow {
@@ -163,7 +142,8 @@ interface FlightTableRow {
   duration: string
   cabin: string
   baggage: string
-  price: string
+  price: string   // combo: this ticket's own price (on its first row); single: the option price
+  total: string   // option total (= sum of ticket prices for combos), on the option's first row
   source: string
   recommended: boolean
   badges: string[]
@@ -196,18 +176,26 @@ function groupBySection(options: CompactOption[]): FlightOptionGroup[] {
   return groups
 }
 
-function buildRows(options: CompactOption[], recommendedOptions: CompactOption[]): FlightTableRow[] {
+export function buildRows(options: CompactOption[], recommendedOptions: CompactOption[]): FlightTableRow[] {
   return options.flatMap((o) => {
     let rowIndex = 0
-    const displayPrice = priceDisplay(o)
-    const source = o.sourceDisplay || o.source || '未返回'
+    const totalPrice = optionPrice(o)
+    // A combo is several separately-booked tickets: price/source per ticket
+    // (blocks[j.blockIndex], on the ticket's first row), total on the first row.
+    const blocks = o.blocks ?? []
+    const isCombo = blocks.length > 1
     const optionKey = `${o.displayNumber ?? o.optionNumber}:${o.optionNumber}:${o.journeys[0]?.segments[0]?.flightNo ?? ''}`
     const isRecommended = recommendedOptions.includes(o)
     const badges = optionBadges(o, isRecommended)
-    return o.journeys.flatMap((j, ji) =>
-      j.segments.map((s, si) => {
+    return o.journeys.flatMap((j, ji) => {
+      const blockIndex = j.blockIndex ?? 0
+      const prevBlockIndex = ji > 0 ? o.journeys[ji - 1]?.blockIndex ?? 0 : null
+      const blockStart = prevBlockIndex === null || blockIndex !== prevBlockIndex
+      const block = blocks[blockIndex]
+      return j.segments.map((s, si) => {
         const first = rowIndex === 0
         const journeyFirst = si === 0
+        const blockFirst = journeyFirst && blockStart
         rowIndex += 1
         return {
           key: `${optionKey}-${ji}-${si}`,
@@ -220,15 +208,22 @@ function buildRows(options: CompactOption[], recommendedOptions: CompactOption[]
           route: routeCell(s),
           time: timeCell(j, s),
           duration: journeyFirst ? durationCell(j) : '',
-          cabin: s.cabin || o.cabin || '未返回',
-          baggage: s.checkedBaggage || o.baggage || '未返回',
-          price: first ? displayPrice : '',
-          source: first ? source : '',
+          // Segment-level facts only: a missing value renders NO_DATA rather
+          // than borrowing the option-level aggregate.
+          cabin: s.cabin || NO_DATA,
+          baggage: s.checkedBaggage || NO_DATA,
+          price: isCombo
+            ? (blockFirst ? (block ? money(block.price.amount, block.price.currency) : NO_DATA) : '')
+            : (first ? totalPrice : ''),
+          total: first ? totalPrice : '',
+          source: isCombo
+            ? (blockFirst ? (block?.source || NO_DATA) : '')
+            : (first ? (o.source || NO_DATA) : ''),
           recommended: isRecommended,
           badges: first ? badges : [],
         }
-      }),
-    )
+      })
+    })
   })
 }
 
@@ -259,7 +254,9 @@ export function FlightResultsTable({
   busy: boolean
 }) {
   const [copied, setCopied] = useState<string | null>(null)
-  const showTotal = useMemo(() => options.some((o) => o.journeys.length > 2), [options])
+  // 总价 column only makes sense when some option is a combo (per-ticket prices
+  // in 价格 + combined total in 总价); otherwise 价格 already is the full price.
+  const showTotal = useMemo(() => options.some((o) => (o.blocks?.length ?? 0) > 1), [options])
   const groups = useMemo(() => groupBySection(options), [options])
   // The skill tags its own picks (最低价 / 直飞最快 / 综合推荐); highlight those.
   const recommendedOptions = useMemo(
@@ -271,7 +268,9 @@ export function FlightResultsTable({
   [groups, recommendedOptions])
 
   async function onCopy(o: CompactOption) {
-    await writeClipboard(copyText(o))
+    const text = copyTextOf(o)
+    if (!text) return
+    await writeClipboard(text)
     const optionKey = `${o.displayNumber ?? o.optionNumber}:${o.optionNumber}:${o.journeys[0]?.segments[0]?.flightNo ?? ''}`
     setCopied(optionKey)
     window.setTimeout(() => setCopied((current) => (current === optionKey ? null : current)), 1400)
@@ -326,7 +325,7 @@ export function FlightResultsTable({
                       {row.optionNumber ? (
                         <div className="flight-actions">
                           <button type="button" disabled={busy} onClick={() => onBook(buildVerifyPrompt(row.option))}>验价</button>
-                          <button type="button" onClick={() => onCopy(row.option)}>{copied === row.optionKey ? '已复制' : '复制'}</button>
+                          <button type="button" disabled={!copyTextOf(row.option)} onClick={() => onCopy(row.option)}>{copied === row.optionKey ? '已复制' : '复制'}</button>
                         </div>
                       ) : null}
                     </td>
@@ -339,7 +338,7 @@ export function FlightResultsTable({
                     <td>{row.cabin}</td>
                     <td>{row.baggage}</td>
                     <td className="num">{row.price}</td>
-                    {showTotal ? <td className="num">{row.price}</td> : null}
+                    {showTotal ? <td className="num">{row.total}</td> : null}
                     <td>{row.source}</td>
                   </tr>
                 ))}

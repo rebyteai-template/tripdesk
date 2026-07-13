@@ -47,6 +47,7 @@ export interface CompactJourney {
   duration: string
   transferCount: number
   layovers?: string[]
+  blockIndex?: number      // bookable-unit index: which separately-booked ticket this journey belongs to
   segments: CompactSegment[]
 }
 export interface CompactOption {
@@ -66,11 +67,12 @@ export interface CompactOption {
   price: {
     amount: number
     currency: string
-    display: string
     perType?: Record<string, { num?: number; unitTotal?: number; subtotal?: number }>
   }
+  /** Combos only: each separately-booked ticket's own price + supply channel,
+   *  indexed by journeys[].blockIndex. option.price is their sum. */
+  blocks?: Array<{ price: { amount: number; currency: string }; source?: string }>
   source?: string
-  sourceDisplay?: string
   copyText?: string
   journeys: CompactJourney[]
 }
@@ -459,29 +461,36 @@ function toCompactOption(raw: unknown): CompactOption | null {
       duration: str(j.duration),
       transferCount: num(j.transferCount),
       layovers: Array.isArray(j.layovers) ? j.layovers.map(str).filter(Boolean) : undefined,
+      blockIndex: num(j.blockIndex),
       segments,
     })
   }
   if (!journeys.length) return null
 
-  const firstTransfer = journeys[0]?.transferCount ?? 0
   const price = isObj(raw.price) ? raw.price : {}
-  const amount = num(price.amount)
   const perType = parseCompactPricePerType(price.perType)
+  // Verbatim from the skill — no recomputed labels, no defaulted currency, no
+  // synthesized display strings. Missing data stays missing; the table shows "--".
+  const blocks: NonNullable<CompactOption['blocks']> = []
+  for (const b of Array.isArray(raw.blocks) ? raw.blocks : []) {
+    if (!isObj(b)) continue
+    const bp = isObj(b.price) ? b.price : {}
+    blocks.push({ price: { amount: num(bp.amount), currency: str(bp.currency) }, source: str(b.source) || undefined })
+  }
   return {
     optionNumber,
     solutionId: str(raw.solutionId) || undefined,
     section: str(raw.section) || undefined,
     tag: str(raw.tag) || null,
-    journeyType: str(raw.journeyType) || (firstTransfer === 0 ? '直飞' : `中转${firstTransfer}次`),
+    journeyType: str(raw.journeyType),
     duration: str(raw.duration),
     durationMinutes: num(raw.durationMinutes),
     cabin: str(raw.cabin),
     baggage: str(raw.baggage) || undefined,
     hasCheckedBaggage: raw.hasCheckedBaggage === true,
-    price: { amount, currency: str(price.currency) || 'CNY', display: str(price.display) || `¥${amount}`, perType },
+    price: { amount: num(price.amount), currency: str(price.currency), perType },
+    blocks: blocks.length > 1 ? blocks : undefined,
     source: str(raw.source) || undefined,
-    sourceDisplay: str(raw.sourceDisplay) || undefined,
     copyText: str(raw.copyText) || undefined,
     journeys,
   }

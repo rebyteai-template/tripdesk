@@ -40,7 +40,7 @@ function compactSearch(optionNumber: number, flightNo: string, amount: number) {
         cabin: '经济 H舱',
         baggage: '托运1*23kg',
         hasCheckedBaggage: true,
-        price: { amount, currency: 'CNY', display: `¥${amount}` },
+        price: { amount, currency: 'CNY' },
         journeys: [
           {
             origin: 'PEK',
@@ -81,7 +81,30 @@ test('derive parses compact search JSON before trailing shell output', () => {
   assert.equal(view.stage, 'search')
   assert.equal(view.search?.options.length, 1)
   assert.equal(view.search?.options[0]?.solutionId, 'sol-mu5186')
+  assert.equal(view.search?.options[0]?.blocks, undefined)
   assert.equal(view.chat.at(-1)?.cards?.length, 1)
+})
+
+test('derive parses combo blocks (per-ticket price/source) and journey blockIndex', () => {
+  const compact = compactSearch(1, 'MU0583', 46071)
+  const combo = compact.displayOptions[0] as Record<string, unknown>
+  combo.solutionId = 'combo:abc123'
+  combo.journeys = [
+    { ...(combo.journeys as Record<string, unknown>[])[0], blockIndex: 0 },
+    { ...(combo.journeys as Record<string, unknown>[])[0], blockIndex: 1 },
+  ]
+  combo.blocks = [
+    { price: { amount: 45021, currency: 'CNY' }, source: '美亚' },
+    { price: { amount: 1050, currency: 'CNY' } },
+  ]
+
+  const view = derive([promptWithToolResult(JSON.stringify(compact))])
+  const option = view.search?.options[0]
+  assert.deepEqual(option?.journeys.map((j) => j.blockIndex), [0, 1])
+  assert.deepEqual(option?.blocks, [
+    { price: { amount: 45021, currency: 'CNY' }, source: '美亚' },
+    { price: { amount: 1050, currency: 'CNY' }, source: undefined },
+  ])
 })
 
 test('derive preserves multiple compact searches in one turn', () => {
