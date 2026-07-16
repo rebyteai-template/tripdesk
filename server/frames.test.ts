@@ -87,6 +87,93 @@ function compactSearch(optionNumber: number, flightNo: string, amount: number) {
   }
 }
 
+function recommendationsResult() {
+  return {
+    schemaVersion: 'flight-recommendations/v1',
+    resultType: 'flight.recommendations',
+    status: 'success',
+    coverageStatus: 'complete',
+    budgetStatus: 'within_budget',
+    capabilities: { canRetry: false, canReverify: false, canCopy: true },
+    plans: [
+      {
+        planId: 'plan-morning-evening',
+        label: '早去晚回',
+        windowKey: 'morning|evening',
+        windows: [
+          { journeyIndex: 0, window: '06:00-09:00' },
+          { journeyIndex: 1, window: '18:00-24:00' },
+        ],
+        journeys: [
+          {
+            journeyId: 'outbound',
+            role: 'outbound',
+            origin: 'PEK',
+            destination: 'MEL',
+            duration: '11h25m',
+            transferCount: 0,
+            segments: [{
+              flightNo: 'CA165', departure: 'PEK', departureName: '北京首都', departureTerminal: 'T3',
+              departureDate: '2026-08-14', departureTime: '07:00', arrival: 'MEL', arrivalName: '墨尔本',
+              arrivalTerminal: 'T2', arrivalDate: '2026-08-14', arrivalTime: '20:25',
+            }],
+          },
+          {
+            journeyId: 'inbound',
+            role: 'inbound',
+            origin: 'SYD',
+            destination: 'HKG',
+            duration: '9h55m',
+            transferCount: 0,
+            segments: [{
+              flightNo: 'HX18', departure: 'SYD', departureName: '悉尼', departureTerminal: 'T1',
+              departureDate: '2026-08-24', departureTime: '18:15', arrival: 'HKG', arrivalName: '香港',
+              arrivalTerminal: 'T1', arrivalDate: '2026-08-25', arrivalTime: '02:10',
+            }],
+          },
+        ],
+        passengerGroups: [
+          { passengerGroupId: 'business', cabinClass: 'business', passengers: { adult: 1, child: 0, infant: 0 } },
+          { passengerGroupId: 'economy', cabinClass: 'economy', passengers: { adult: 3, child: 0, infant: 0 } },
+        ],
+        ticketGroups: [
+          {
+            ticketGroupId: 'business-joint', passengerGroupId: 'business', journeyIndexes: [0, 1],
+            fareSource: 'joint', source: 'meiya', cabin: '商务 Z/I舱', baggage: '托运2*32kg',
+            exactPassengerCount: { adult: 1, child: 0, infant: 0 },
+            verifiedPrice: { amount: 28400, currency: 'CNY' },
+            verifiedAt: '2099-07-16T05:00:00.000Z',
+            validity: { status: 'verified', validUntil: '2099-07-16T05:10:00.000Z' },
+          },
+          {
+            ticketGroupId: 'economy-outbound', passengerGroupId: 'economy', journeyIndexes: [0],
+            fareSource: 'oneway', source: 'meiya', cabin: '经济 T舱', baggage: '托运1*23kg',
+            exactPassengerCount: { adult: 3, child: 0, infant: 0 },
+            verifiedPrice: { amount: 11427, currency: 'CNY' },
+            verifiedAt: '2099-07-16T05:00:00.000Z',
+            validity: { status: 'verified', validUntil: '2099-07-16T05:10:00.000Z' },
+          },
+          {
+            ticketGroupId: 'economy-inbound', passengerGroupId: 'economy', journeyIndexes: [1],
+            fareSource: 'oneway', source: 'yinling', cabin: '经济 W舱', baggage: '托运1*23kg',
+            exactPassengerCount: { adult: 3, child: 0, infant: 0 },
+            verifiedPrice: { amount: 6423, currency: 'CNY' },
+            verifiedAt: '2099-07-16T05:00:00.000Z',
+            validity: { status: 'verified', validUntil: '2099-07-16T05:10:00.000Z' },
+          },
+        ],
+        verifiedFareTotal: { amount: 46250, currency: 'CNY' },
+        customerQuoteTotal: { amount: 46250, currency: 'CNY' },
+        verifiedAt: '2099-07-16T05:00:00.000Z',
+        validity: { status: 'verified', validUntil: '2099-07-16T05:10:00.000Z' },
+        explanation: { reason: '覆盖早去晚回，价格最低。', limitation: '回程跨夜。' },
+        copyText: '早去晚回\nCA165 / HX18\n总价 CNY 46250',
+        capabilities: { canCopy: true, canReverify: false, canBook: false },
+      },
+    ],
+  }
+}
+
 test('derive parses compact search JSON before trailing shell output', () => {
   const compact = compactSearch(1, 'MU5186', 1000)
   const rawOption = compact.displayOptions[0] as unknown as Record<string, unknown>
@@ -276,6 +363,227 @@ test('a final proposal replaces search and pricing tables with one OP card', () 
   assert.equal(view.chat.find((bubble) => bubble.proposal)?.proposal?.journeys.length, 2)
   assert.equal(view.chat.find((bubble) => bubble.proposal)?.proposal?.journeys[0]?.fares.length, 2)
   assert.equal(view.chat.find((bubble) => bubble.text.includes('最终如下'))?.text, '最终如下')
+})
+
+test('a recommendation result is authoritative regardless of frame order and retains search as evidence', () => {
+  const recommendation = recommendationsResult()
+  const search = compactSearch(1, 'CA165', 14932) as Record<string, unknown>
+  search.schemaVersion = 'flight-search/v1'
+  search.resultType = 'flight.search'
+  const prompt = promptWithToolResult('')
+  prompt.frames = [
+    { seq: 1, data: { type: 'user', message: { content: [{ type: 'tool_result', content: JSON.stringify(recommendation) }] } } },
+    { seq: 2, data: { type: 'user', message: { content: [{ type: 'tool_result', content: JSON.stringify(compactVerify('AA2883', 4000)) }] } } },
+    { seq: 3, data: { type: 'assistant', message: { content: [{ type: 'text', text: '中间表\n\n| 航班 | 价格 |\n| --- | --- |\n| CA165 | ¥14932 |' }] } } },
+    { seq: 4, data: { type: 'user', message: { content: [{ type: 'tool_result', content: JSON.stringify(search) }] } } },
+  ]
+
+  const view = derive([prompt])
+  assert.equal(view.stage, 'recommendation')
+  assert.equal(view.fare, null)
+  assert.equal(view.recommendations?.plans[0]?.planId, 'plan-morning-evening')
+  assert.equal(view.chat.filter((bubble) => bubble.recommendations).length, 1)
+  assert.equal(view.chat.some((bubble) => bubble.cards || bubble.fare || bubble.proposal), false)
+  assert.equal(view.chat.find((bubble) => bubble.recommendations)?.evidence?.length, 1)
+  assert.equal(view.chat.find((bubble) => bubble.text.includes('中间表'))?.text, '中间表')
+})
+
+test('a new recommendation result outranks a legacy proposal emitted later in the same turn', () => {
+  const legacy = {
+    schemaVersion: 'flight-proposal/v1', resultType: 'flight.proposal', ok: true, title: '旧报价',
+    journeys: [{
+      role: 'oneway',
+      itinerary: {
+        origin: 'PEK', destination: 'SHA', duration: '2h', transferCount: 0,
+        segments: [{
+          flightNo: 'MU5186', departure: 'PEK', departureDate: '2026-08-05', departureTime: '07:45',
+          arrival: 'SHA', arrivalDate: '2026-08-05', arrivalTime: '10:05', cabin: '经济 H舱',
+        }],
+      },
+      fares: [{ passengers: 1, passengerType: 'adult', cabin: '经济 H舱', baggage: '1件', unitPrice: 1000, subtotal: 1000 }],
+      subtotal: 1000,
+    }],
+    total: { amount: 1000, currency: 'CNY' }, copyText: '旧报价', capabilities: { canCopy: true, canBook: false },
+  }
+  const prompt = promptWithToolResult('')
+  prompt.frames = [
+    { seq: 1, data: { type: 'user', message: { content: [{ type: 'tool_result', content: JSON.stringify(recommendationsResult()) }] } } },
+    { seq: 2, data: { type: 'user', message: { content: [{ type: 'tool_result', content: JSON.stringify(legacy) }] } } },
+  ]
+
+  const view = derive([prompt])
+  assert.equal(view.chat.some((bubble) => bubble.proposal), false)
+  assert.equal(view.chat.filter((bubble) => bubble.recommendations).length, 1)
+})
+
+test('multiple plan-bearing recommendation results in one turn fail closed instead of taking the last result', () => {
+  const first = recommendationsResult()
+  const second = structuredClone(first)
+  second.plans[0]!.planId = 'plan-from-separate-recommend-call'
+  second.plans[0]!.label = '另一次独立 recommend 的方案'
+  const prompt = promptWithToolResult('')
+  prompt.frames = [
+    { seq: 1, data: { type: 'user', message: { content: [{ type: 'tool_result', content: JSON.stringify(first) }] } } },
+    { seq: 2, data: { type: 'user', message: { content: [{ type: 'tool_result', content: JSON.stringify(second) }] } } },
+  ]
+
+  const view = derive([prompt])
+  assert.equal(view.stage, 'recommendation')
+  assert.equal(view.recommendations?.status, 'fatal_error')
+  assert.equal(view.recommendations?.plans.length, 0)
+  assert.match(view.recommendations?.message ?? '', /多个独立的推荐结果/)
+  assert.equal(view.chat.filter((bubble) => bubble.recommendations).length, 1)
+})
+
+test('an identical recommendation result replay in one turn is de-duplicated rather than treated as a conflict', () => {
+  const payload = recommendationsResult()
+  const prompt = promptWithToolResult('')
+  prompt.frames = [
+    { seq: 1, data: { type: 'user', message: { content: [{ type: 'tool_result', content: JSON.stringify(payload) }] } } },
+    { seq: 2, data: { type: 'user', message: { content: [{ type: 'tool_result', content: JSON.stringify(payload) }] } } },
+  ]
+
+  const view = derive([prompt])
+  assert.equal(view.recommendations?.status, 'success')
+  assert.equal(view.recommendations?.plans[0]?.planId, 'plan-morning-evening')
+})
+
+test('malformed explicit recommendation results fail closed instead of falling through to evidence', () => {
+  const invalidPayloads = [
+    { ...recommendationsResult(), schemaVersion: 'flight-recommendations/v999' },
+    { ...recommendationsResult(), plans: [] },
+    (() => {
+      const value = structuredClone(recommendationsResult())
+      value.plans[0]!.ticketGroups[2]!.journeyIndexes = [0]
+      return value
+    })(),
+    (() => {
+      const value = structuredClone(recommendationsResult())
+      value.plans[0]!.ticketGroups[2]!.verifiedPrice.currency = 'USD'
+      return value
+    })(),
+    (() => {
+      const value = structuredClone(recommendationsResult())
+      value.plans[0]!.copyText = ''
+      return value
+    })(),
+    (() => {
+      const value = structuredClone(recommendationsResult())
+      value.plans[0]!.ticketGroups[0]!.exactPassengerCount.adult = 2
+      return value
+    })(),
+  ]
+
+  for (const payload of invalidPayloads) {
+    const prompt = promptWithToolResult('')
+    prompt.frames = [
+      { seq: 1, data: { type: 'user', message: { content: [{ type: 'tool_result', content: JSON.stringify(compactSearch(1, 'CA165', 14932)) }] } } },
+      { seq: 2, data: { type: 'user', message: { content: [{ type: 'tool_result', content: JSON.stringify(payload) }] } } },
+    ]
+    const view = derive([prompt])
+    assert.equal(view.stage, 'recommendation')
+    assert.equal(view.recommendations?.status, 'fatal_error')
+    assert.equal(view.chat.some((bubble) => bubble.cards), false)
+  }
+
+  const missingResultType = {
+    ...compactSearch(1, 'CA165', 14932),
+    schemaVersion: 'flight-recommendations/v1',
+  }
+  delete (missingResultType as { resultType?: string }).resultType
+  const view = derive([promptWithToolResult(JSON.stringify(missingResultType))])
+  assert.equal(view.stage, 'recommendation')
+  assert.equal(view.recommendations?.status, 'fatal_error')
+  assert.equal(view.chat.some((bubble) => bubble.cards), false)
+})
+
+test('recommendation sets reject duplicate plan identities and more than ten plans', () => {
+  const duplicatePlan = structuredClone(recommendationsResult())
+  duplicatePlan.plans.push(structuredClone(duplicatePlan.plans[0]!))
+  const tooMany = structuredClone(recommendationsResult())
+  tooMany.plans = Array.from({ length: 11 }, (_, index) => ({
+    ...structuredClone(tooMany.plans[0]!),
+    planId: `plan-${index}`,
+    windowKey: `window-${index}`,
+  }))
+
+  for (const payload of [duplicatePlan, tooMany]) {
+    const view = derive([promptWithToolResult(JSON.stringify(payload))])
+    assert.equal(view.recommendations?.status, 'fatal_error')
+  }
+})
+
+test('recommendation sets render distinct plans that share the same time window', () => {
+  const payload = structuredClone(recommendationsResult())
+  const transferPlan = structuredClone(payload.plans[0]!)
+  transferPlan.planId = 'plan-transfer-same-window'
+  transferPlan.label = '同一时间窗的一次中转方案'
+  transferPlan.journeys[0]!.transferCount = 1
+  payload.plans.push(transferPlan)
+
+  const view = derive([promptWithToolResult(JSON.stringify(payload))])
+  assert.equal(view.recommendations?.status, 'success')
+  assert.deepEqual(view.recommendations?.plans.map((plan) => plan.planId), [
+    'plan-morning-evening',
+    'plan-transfer-same-window',
+  ])
+})
+
+test('recommendation windowKey is optional and the ten-plan cap is inclusive', () => {
+  const payload = structuredClone(recommendationsResult())
+  payload.plans = Array.from({ length: 10 }, (_, index) => {
+    const plan = structuredClone(payload.plans[0]!)
+    plan.planId = `plan-${index}`
+    delete (plan as { windowKey?: string }).windowKey
+    plan.windows[0]!.window = `${String(index).padStart(2, '0')}:00-${String(index + 1).padStart(2, '0')}:00`
+    return plan
+  })
+
+  const view = derive([promptWithToolResult(JSON.stringify(payload))])
+  assert.equal(view.recommendations?.status, 'success')
+  assert.equal(view.recommendations?.plans.length, 10)
+  assert.equal(view.recommendations?.plans[0]?.windowKey, undefined)
+})
+
+test('non-plan recommendation states parse without reviving search evidence as primary output', () => {
+  for (const status of ['loading', 'empty', 'fatal_error'] as const) {
+    const payload = {
+      schemaVersion: 'flight-recommendations/v1',
+      resultType: 'flight.recommendations',
+      status,
+      coverageStatus: status === 'fatal_error' ? 'failed' : 'partial',
+      budgetStatus: 'within_budget',
+      capabilities: { canRetry: true, canReverify: false, canCopy: false },
+      message: `state:${status}`,
+      plans: [],
+    }
+    const view = derive([promptWithToolResult(JSON.stringify(payload))])
+    assert.equal(view.stage, 'recommendation')
+    assert.equal(view.recommendations?.status, status)
+    assert.equal(view.chat.filter((bubble) => bubble.recommendations).length, 1)
+  }
+})
+
+test('recommendations do not change state based on a local price-expiry clock', () => {
+  const payload = structuredClone(recommendationsResult())
+  for (const plan of payload.plans) {
+    plan.verifiedAt = '2020-01-01T00:00:00.000Z'
+    plan.validity.validUntil = '2020-01-01T00:05:00.000Z'
+    for (const ticket of plan.ticketGroups) {
+      ticket.verifiedAt = plan.verifiedAt
+      ticket.validity.validUntil = plan.validity.validUntil
+    }
+  }
+
+  const view = derive([promptWithToolResult(JSON.stringify(payload))])
+  assert.equal(view.recommendations?.status, 'success')
+  assert.equal(view.recommendations?.plans[0]?.validity.status, 'verified')
+  assert.deepEqual(view.recommendations?.plans[0]?.capabilities, {
+    canCopy: true,
+    canReverify: false,
+    canBook: false,
+  })
+  assert.equal(view.recommendations?.capabilities.canRetry, false)
 })
 
 function compactVerify(flightNo: string, amount: number) {

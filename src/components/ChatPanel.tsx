@@ -5,6 +5,7 @@ import { parseTs, shortStamp, fullStamp } from '../lib/time.ts'
 import { Markdown } from './Markdown.tsx'
 import { FlightResultsTable } from './FlightResultsTable.tsx'
 import { FlightProposalTable } from './FlightProposalTable.tsx'
+import { FlightRecommendationsView } from './FlightRecommendations.tsx'
 import { FareDetailTable } from './FareDetailTable.tsx'
 import { FileCard } from './FileCard.tsx'
 import { Lightbox } from './Lightbox.tsx'
@@ -103,13 +104,15 @@ export function ChatPanel({
           // Inline card turn: the (table-stripped) assistant prose, then the search cards or the
           // verify fare card. The fare card shows its CTA only on the latest fare and only while no
           // write-flow step is open (onContinue is undefined otherwise → the form is showing below).
-          if (b.cards || b.fare || b.proposal) {
+          if (b.cards || b.fare || b.proposal || b.recommendations) {
             return (
               <div key={b.key} className="msg full">
                 <div className="chat-cards">
                   {b.text.trim() ? <div className="bubble assistant"><Markdown text={b.text} /></div> : null}
-                  {b.proposal
-                    ? <FlightProposalTable proposal={b.proposal} />
+                  {b.recommendations
+                    ? <FlightRecommendationsView result={b.recommendations} evidence={b.evidence} busy={busy} onAction={onBook} />
+                    : b.proposal
+                      ? <FlightProposalTable proposal={b.proposal} />
                     : b.cards
                       ? <FlightResultsTable options={b.cards} totalCount={b.totalCount} coverage={b.coverage} onBook={onBook} busy={busy} />
                       : <FareDetailTable fare={b.fare!} busy={busy} onContinue={b.fare === fareLatest ? onContinue : undefined} />}

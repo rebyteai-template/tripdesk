@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import type { CompactJourney, CompactOption, CompactPrice, CompactSegment, FareSource, SearchCoverage } from '../frames.ts'
-import { flightRouteCell } from '../lib/flight-display.ts'
+import { flightDateCn, flightMoney, flightRouteCell } from '../lib/flight-display.ts'
 import { stopsLabel } from '../booking.ts'
 
 /** Shown whenever upstream data is missing. The table never substitutes data
@@ -8,15 +8,9 @@ import { stopsLabel } from '../booking.ts'
  *  at the source (skill/API), not papered over here. */
 const NO_DATA = '--'
 
-function dateCn(iso: string): string {
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso)
-  return m ? `${Number(m[2])}月${m[3]}日` : iso
-}
-
 function money(amount: number, currency: string): string {
   if (!Number.isFinite(amount) || amount <= 0 || !currency) return NO_DATA
-  const prefix = currency.toUpperCase() === 'CNY' ? '¥' : `${currency} `
-  return `${prefix}${amount.toLocaleString('zh-CN')}`
+  return flightMoney(amount, currency)
 }
 
 function optionPrice(o: CompactOption): string {
@@ -288,7 +282,7 @@ export function buildRows(options: CompactOption[], recommendedOptions: CompactO
           journey: journeyFirst ? journeyLabel(o, j, ji) : '',
           fareSource: first ? fareSourceLabel(o) : '',
           flightNo: s.flightNo,
-          date: dateCn(s.departureDate),
+          date: flightDateCn(s.departureDate),
           route: flightRouteCell(s),
           time: timeCell(j, s),
           duration: journeyFirst ? durationCell(j) : '',
@@ -317,12 +311,14 @@ export function FlightResultsTable({
   coverage,
   onBook,
   busy,
+  readOnly = false,
 }: {
   options: CompactOption[]
   totalCount?: number
   coverage?: SearchCoverage
-  onBook: (prompt: string) => void
-  busy: boolean
+  onBook?: (prompt: string) => void
+  busy?: boolean
+  readOnly?: boolean
 }) {
   // A total column makes the price scope explicit for split tickets and for
   // parties. When an upstream fallback lacks a passenger split, keep the party
@@ -376,7 +372,7 @@ export function FlightResultsTable({
               <thead>
                 <tr>
                   <th>方案</th>
-                  <th>操作</th>
+                  {!readOnly ? <th>操作</th> : null}
                   <th>航程</th>
                   <th>票价来源</th>
                   <th>航班号</th>
@@ -402,13 +398,15 @@ export function FlightResultsTable({
                         </div>
                       ) : null}
                     </td>
-                    <td>
-                      {row.optionNumber ? (
-                        <div className="flight-actions">
-                          <button type="button" disabled={busy} onClick={() => onBook(buildVerifyPrompt(row.option))}>{optionActionLabel(row.option)}</button>
-                        </div>
-                      ) : null}
-                    </td>
+                    {!readOnly ? (
+                      <td>
+                        {row.optionNumber ? (
+                          <div className="flight-actions">
+                            <button type="button" disabled={busy} onClick={() => onBook?.(buildVerifyPrompt(row.option))}>{optionActionLabel(row.option)}</button>
+                          </div>
+                        ) : null}
+                      </td>
+                    ) : null}
                     <td>{row.journey}</td>
                     <td>{row.fareSource}</td>
                     <td className="mono">{row.flightNo}</td>

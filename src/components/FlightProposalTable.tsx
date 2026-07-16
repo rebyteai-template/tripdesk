@@ -1,23 +1,7 @@
 import { useState } from 'react'
 
 import type { FlightProposal, ProposalJourney } from '../frames.ts'
-import { flightRouteCell } from '../lib/flight-display.ts'
-
-function dateCn(iso: string): string {
-  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso)
-  return match ? `${Number(match[2])}月${match[3]}日` : iso
-}
-
-function money(amount: number, currency: string): string {
-  const prefix = currency.toUpperCase() === 'CNY' ? '¥' : `${currency} `
-  return `${prefix}${amount.toLocaleString('zh-CN')}`
-}
-
-function roleLabel(role: ProposalJourney['role'], index: number): string {
-  if (role === 'outbound') return '去程'
-  if (role === 'inbound') return '回程'
-  return role === 'oneway' ? '单程' : `第${index + 1}程`
-}
+import { flightDateCn, flightMoney, flightRouteCell, journeyRoleLabel } from '../lib/flight-display.ts'
 
 function journeyFacts(journey: ProposalJourney) {
   const segments = journey.itinerary.segments
@@ -26,7 +10,7 @@ function journeyFacts(journey: ProposalJourney) {
   const cross = last.arrivalDate > first.departureDate ? '(+1)' : ''
   return {
     flightNo: segments.map((segment) => segment.flightNo).join(' → '),
-    date: dateCn(first.departureDate),
+    date: flightDateCn(first.departureDate),
     route: segments.map(flightRouteCell).join(' / '),
     time: `${first.departureTime}-${last.arrivalTime}${cross}`,
     duration: journey.itinerary.duration || first.flightTime || '--',
@@ -73,14 +57,14 @@ export function FlightProposalTable({ proposal }: { proposal: FlightProposal }) 
               const facts = journeyFacts(journey)
               return (
                 <tr key={`${journey.role}-${facts.flightNo}-${index}`}>
-                  <td><span className="proposal-role">{roleLabel(journey.role, index)}</span></td>
+                  <td><span className="proposal-role">{journeyRoleLabel(journey.role, index)}</span></td>
                   <td className="proposal-flight"><strong className="mono">{facts.flightNo}</strong><span>{facts.date}</span></td>
                   <td className="route-cell">{facts.route}</td>
                   <td className="proposal-time"><strong className="mono">{facts.time}</strong><span>{facts.duration}</span></td>
                   <td className="proposal-fares">
                     {journey.fares.map((fare) => (
                       <div key={`${fare.passengerType}-${fare.cabin}`} className="proposal-fare-line">
-                        <span><strong>{fare.passengers}人 {fare.cabin}</strong> · {money(fare.unitPrice, proposal.total.currency)}/人</span>
+                        <span><strong>{fare.passengers}人 {fare.cabin}</strong> · {flightMoney(fare.unitPrice, proposal.total.currency)}/人</span>
                         <span className="muted">{fare.baggage}</span>
                       </div>
                     ))}
@@ -92,7 +76,7 @@ export function FlightProposalTable({ proposal }: { proposal: FlightProposal }) 
           <tfoot>
             <tr>
               <th colSpan={4}>方案总价</th>
-              <td className="proposal-total">{money(proposal.total.amount, proposal.total.currency)}</td>
+              <td className="proposal-total">{flightMoney(proposal.total.amount, proposal.total.currency)}</td>
             </tr>
           </tfoot>
         </table>

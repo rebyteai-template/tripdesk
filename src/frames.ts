@@ -141,6 +141,94 @@ export interface FlightProposal {
   capabilities: { canCopy: boolean; canBook: boolean }
 }
 
+// ── authoritative recommendations (several complete, verified plans) ────
+export type RecommendationStatus = 'loading' | 'success' | 'partial' | 'empty' | 'expired' | 'fatal_error'
+export type RecommendationCoverageStatus = 'complete' | 'partial' | 'failed'
+export type RecommendationBudgetStatus = 'within_budget' | 'exhausted'
+export type RecommendationValidityStatus = 'verified' | 'expired'
+
+export interface RecommendationWindow {
+  journeyIndex: number
+  window: string
+}
+
+export interface RecommendationSegment {
+  flightNo: string
+  opFlightNo?: string
+  departure: string
+  departureName?: string
+  departureTerminal?: string
+  departureDate: string
+  departureTime: string
+  arrival: string
+  arrivalName?: string
+  arrivalTerminal?: string
+  arrivalDate: string
+  arrivalTime: string
+  flightTime?: string
+}
+
+export interface RecommendationJourney {
+  journeyId: string
+  role: JourneyRole
+  origin: string
+  destination: string
+  duration: string
+  transferCount: number
+  segments: RecommendationSegment[]
+}
+
+export interface RecommendationPassengerGroup {
+  passengerGroupId: string
+  cabinClass: string
+  passengers: { adult: number; child: number; infant: number }
+}
+
+export interface RecommendationTicketGroup {
+  ticketGroupId: string
+  passengerGroupId: string
+  journeyIndexes: number[]
+  fareSource: FareSource
+  source?: string
+  cabin?: string
+  baggage?: string
+  exactPassengerCount: { adult: number; child: number; infant: number }
+  verifiedAt: string
+  validity: { status: RecommendationValidityStatus; validUntil: string }
+  verifiedPrice: CompactPrice
+}
+
+export interface RecommendationPlan {
+  planId: string
+  label?: string
+  windowKey?: string
+  windows: RecommendationWindow[]
+  journeys: RecommendationJourney[]
+  passengerGroups: RecommendationPassengerGroup[]
+  ticketGroups: RecommendationTicketGroup[]
+  verifiedFareTotal: CompactPrice
+  customerQuoteTotal?: CompactPrice
+  verifiedAt: string
+  validity: { status: RecommendationValidityStatus; validUntil: string }
+  explanation?: { reason: string; limitation?: string }
+  copyText: string
+  capabilities: { canCopy: boolean; canReverify: boolean; canBook: boolean }
+}
+
+export interface FlightRecommendations {
+  schemaVersion: 'flight-recommendations/v1'
+  resultType: 'flight.recommendations'
+  status: RecommendationStatus
+  coverageStatus: RecommendationCoverageStatus
+  budgetStatus: RecommendationBudgetStatus
+  message?: string
+  reason?: string
+  missingFareConstructions?: FareSource[]
+  diagnostics?: Record<string, unknown>
+  capabilities: { canRetry: boolean; canReverify: boolean; canCopy: boolean }
+  plans: RecommendationPlan[]
+}
+
 // ── verify (simplifly-flyai-skill CLI JSON) ──────────
 // Versioned results are decoded by schema and result type. A shape-based legacy
 // adapter remains for saved history, but it never enables copy or booking actions.
@@ -238,18 +326,23 @@ export interface ChatBubble {
   /** Final selected customer proposal. Its presence suppresses every search/pricing
    *  table produced while the agent assembled it. */
   proposal?: FlightProposal
+  /** Authoritative multi-plan result. Search results used to create it are retained as
+   *  collapsed, read-only evidence on the same bubble and never regain primary status. */
+  recommendations?: FlightRecommendations
+  evidence?: SearchResult[]
   /** Images/files the user attached to this turn — rendered above the user bubble (thumbnails /
    *  file chips). Set only on user bubbles, only when non-empty. */
   attachments?: Attachment[]
 }
 
-export type Stage = 'idle' | 'search' | 'verify' | 'order' | 'payment'
+export type Stage = 'idle' | 'search' | 'verify' | 'recommendation' | 'order' | 'payment'
 
 export interface DerivedView {
   chat: ChatBubble[]
   stage: Stage
   search: SearchResult | null
   fare: FareVerification | null
+  recommendations: FlightRecommendations | null
   /** Last domain-tool failure surfaced to the user (e.g. price expired). */
   notice: string | null
 }
@@ -370,6 +463,274 @@ function parseProposal(raw: Record<string, unknown>): FlightProposal | null {
   return proposal.total.amount > 0 && proposal.total.currency && proposal.copyText ? proposal : null
 }
 
+const RECOMMENDATIONS_SCHEMA_VERSION = 'flight-recommendations/v1'
+const RECOMMENDATIONS_RESULT_TYPE = 'flight.recommendations'
+const MAX_RECOMMENDATION_PLANS = 10
+
+function parsePositivePrice(raw: unknown): CompactPrice | null {
+  if (!isObj(raw) || typeof raw.amount !== 'number' || !Number.isFinite(raw.amount) || raw.amount <= 0) return null
+  if (typeof raw.currency !== 'string' || !raw.currency.trim()) return null
+  return { amount: raw.amount, currency: raw.currency, perType: parseCompactPricePerType(raw.perType) }
+}
+
+function parseRecommendationCapabilities(raw: unknown): RecommendationPlan['capabilities'] | null {
+  if (!isObj(raw)) return null
+  if (typeof raw.canCopy !== 'boolean' || typeof raw.canReverify !== 'boolean' || typeof raw.canBook !== 'boolean') return null
+  return { canCopy: raw.canCopy, canReverify: raw.canReverify, canBook: raw.canBook }
+}
+
+function parseRecommendationPassengerCount(raw: unknown): RecommendationPassengerGroup['passengers'] | null {
+  if (!isObj(raw)) return null
+  const values = [raw.adult, raw.child, raw.infant]
+  if (!values.every((count) => typeof count === 'number' && Number.isInteger(count) && count >= 0)) return null
+  const adult = raw.adult as number
+  const child = raw.child as number
+  const infant = raw.infant as number
+  if (adult + child + infant <= 0) return null
+  return { adult, child, infant }
+}
+
+function parseRecommendationSegment(raw: unknown): RecommendationSegment | null {
+  if (!isObj(raw)) return null
+  const required = [raw.flightNo, raw.departure, raw.departureDate, raw.departureTime, raw.arrival, raw.arrivalDate, raw.arrivalTime]
+  if (!required.every((value) => typeof value === 'string' && value.trim())) return null
+  return {
+    flightNo: str(raw.flightNo),
+    ...(str(raw.opFlightNo) ? { opFlightNo: str(raw.opFlightNo) } : {}),
+    departure: str(raw.departure),
+    ...(str(raw.departureName) ? { departureName: str(raw.departureName) } : {}),
+    ...(str(raw.departureTerminal) ? { departureTerminal: str(raw.departureTerminal) } : {}),
+    departureDate: str(raw.departureDate),
+    departureTime: str(raw.departureTime),
+    arrival: str(raw.arrival),
+    ...(str(raw.arrivalName) ? { arrivalName: str(raw.arrivalName) } : {}),
+    ...(str(raw.arrivalTerminal) ? { arrivalTerminal: str(raw.arrivalTerminal) } : {}),
+    arrivalDate: str(raw.arrivalDate),
+    arrivalTime: str(raw.arrivalTime),
+    ...(str(raw.flightTime) ? { flightTime: str(raw.flightTime) } : {}),
+  }
+}
+
+function parseRecommendationPlan(raw: unknown): RecommendationPlan | null {
+  if (!isObj(raw)) return null
+  const planId = str(raw.planId).trim()
+  const windowKey = str(raw.windowKey).trim()
+  if (!planId || !Array.isArray(raw.journeys) || !raw.journeys.length) return null
+
+  const journeys: RecommendationJourney[] = []
+  const journeyIds = new Set<string>()
+  for (const item of raw.journeys) {
+    if (!isObj(item) || !isJourneyRole(item.role) || !Array.isArray(item.segments) || !item.segments.length) return null
+    const journeyId = str(item.journeyId).trim()
+    const origin = str(item.origin).trim()
+    const destination = str(item.destination).trim()
+    const duration = str(item.duration).trim()
+    if (!journeyId || journeyIds.has(journeyId) || !origin || !destination || !duration) return null
+    if (typeof item.transferCount !== 'number' || !Number.isInteger(item.transferCount) || item.transferCount < 0) return null
+    const segments = item.segments.map(parseRecommendationSegment)
+    if (segments.some((segment) => !segment)) return null
+    journeyIds.add(journeyId)
+    journeys.push({
+      journeyId,
+      role: item.role,
+      origin,
+      destination,
+      duration,
+      transferCount: item.transferCount,
+      segments: segments as RecommendationSegment[],
+    })
+  }
+
+  if (!Array.isArray(raw.windows) || raw.windows.length !== journeys.length) return null
+  const windows: RecommendationWindow[] = []
+  const windowJourneys = new Set<number>()
+  for (const item of raw.windows) {
+    if (!isObj(item) || typeof item.journeyIndex !== 'number' || !Number.isInteger(item.journeyIndex)) return null
+    if (item.journeyIndex < 0 || item.journeyIndex >= journeys.length || windowJourneys.has(item.journeyIndex)) return null
+    const window = str(item.window).trim()
+    if (!window) return null
+    windowJourneys.add(item.journeyIndex)
+    windows.push({ journeyIndex: item.journeyIndex, window })
+  }
+
+  if (!Array.isArray(raw.passengerGroups) || !raw.passengerGroups.length) return null
+  const passengerGroups: RecommendationPassengerGroup[] = []
+  const passengerGroupIds = new Set<string>()
+  for (const item of raw.passengerGroups) {
+    if (!isObj(item)) return null
+    const passengerGroupId = str(item.passengerGroupId).trim()
+    const cabinClass = str(item.cabinClass).trim()
+    const passengers = parseRecommendationPassengerCount(item.passengers)
+    if (!passengerGroupId || passengerGroupIds.has(passengerGroupId) || !cabinClass || !passengers) return null
+    passengerGroupIds.add(passengerGroupId)
+    passengerGroups.push({
+      passengerGroupId,
+      cabinClass,
+      passengers,
+    })
+  }
+
+  if (!Array.isArray(raw.ticketGroups) || !raw.ticketGroups.length) return null
+  const ticketGroups: RecommendationTicketGroup[] = []
+  const ticketGroupIds = new Set<string>()
+  for (const item of raw.ticketGroups) {
+    if (!isObj(item) || !isFareSource(item.fareSource) || !Array.isArray(item.journeyIndexes) || !item.journeyIndexes.length) return null
+    const ticketGroupId = str(item.ticketGroupId).trim()
+    const passengerGroupId = str(item.passengerGroupId).trim()
+    if (!ticketGroupId || ticketGroupIds.has(ticketGroupId) || !passengerGroupIds.has(passengerGroupId)) return null
+    const journeyIndexes = item.journeyIndexes
+    if (journeyIndexes.some((value) => typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value >= journeys.length)) return null
+    if (new Set(journeyIndexes).size !== journeyIndexes.length) return null
+    const verifiedPrice = parsePositivePrice(item.verifiedPrice)
+    if (!verifiedPrice) return null
+    const exactPassengerCount = parseRecommendationPassengerCount(item.exactPassengerCount)
+    const passengerGroup = passengerGroups.find((group) => group.passengerGroupId === passengerGroupId)
+    if (!exactPassengerCount || !passengerGroup || (
+      exactPassengerCount.adult !== passengerGroup.passengers.adult
+      || exactPassengerCount.child !== passengerGroup.passengers.child
+      || exactPassengerCount.infant !== passengerGroup.passengers.infant
+    )) return null
+    const verifiedAt = str(item.verifiedAt)
+    if (!verifiedAt || !Number.isFinite(Date.parse(verifiedAt)) || !isObj(item.validity)) return null
+    const validityStatus = item.validity.status
+    const validUntil = str(item.validity.validUntil)
+    if ((validityStatus !== 'verified' && validityStatus !== 'expired') || !validUntil || !Number.isFinite(Date.parse(validUntil))) return null
+    if (Date.parse(validUntil) <= Date.parse(verifiedAt)) return null
+    ticketGroupIds.add(ticketGroupId)
+    ticketGroups.push({
+      ticketGroupId,
+      passengerGroupId,
+      journeyIndexes: journeyIndexes as number[],
+      fareSource: item.fareSource,
+      ...(str(item.source) ? { source: str(item.source) } : {}),
+      ...(str(item.cabin) ? { cabin: str(item.cabin) } : {}),
+      ...(str(item.baggage) ? { baggage: str(item.baggage) } : {}),
+      exactPassengerCount,
+      verifiedAt,
+      validity: { status: validityStatus, validUntil },
+      verifiedPrice,
+    })
+  }
+
+  // Every passenger/cabin group must be covered by ticket groups exactly once for every journey.
+  for (const passengerGroupId of passengerGroupIds) {
+    const counts = Array.from({ length: journeys.length }, () => 0)
+    for (const group of ticketGroups) {
+      if (group.passengerGroupId !== passengerGroupId) continue
+      for (const journeyIndex of group.journeyIndexes) counts[journeyIndex] = (counts[journeyIndex] ?? 0) + 1
+    }
+    if (counts.some((count) => count !== 1)) return null
+  }
+
+  const verifiedFareTotal = parsePositivePrice(raw.verifiedFareTotal)
+  const customerQuoteTotal = raw.customerQuoteTotal === undefined ? undefined : parsePositivePrice(raw.customerQuoteTotal)
+  if (!verifiedFareTotal || raw.customerQuoteTotal !== undefined && !customerQuoteTotal) return null
+  const currency = verifiedFareTotal.currency
+  if (ticketGroups.some((group) => group.verifiedPrice.currency !== currency)) return null
+  if (customerQuoteTotal && customerQuoteTotal.currency !== currency) return null
+  const ticketTotal = ticketGroups.reduce((sum, group) => sum + group.verifiedPrice.amount, 0)
+  if (Math.abs(ticketTotal - verifiedFareTotal.amount) > 0.001) return null
+
+  const verifiedAt = str(raw.verifiedAt)
+  if (!verifiedAt || !Number.isFinite(Date.parse(verifiedAt)) || !isObj(raw.validity)) return null
+  const validityStatus = raw.validity.status
+  const validUntil = str(raw.validity.validUntil)
+  if ((validityStatus !== 'verified' && validityStatus !== 'expired') || !validUntil || !Number.isFinite(Date.parse(validUntil))) return null
+  if (Date.parse(validUntil) <= Date.parse(verifiedAt)) return null
+  if (ticketGroups.some((group) => group.validity.status !== validityStatus)) return null
+  const latestTicketVerification = Math.max(...ticketGroups.map((group) => Date.parse(group.verifiedAt)))
+  const earliestTicketExpiry = Math.min(...ticketGroups.map((group) => Date.parse(group.validity.validUntil)))
+  if (Date.parse(verifiedAt) !== latestTicketVerification || Date.parse(validUntil) !== earliestTicketExpiry) return null
+  const capabilities = parseRecommendationCapabilities(raw.capabilities)
+  if (!capabilities) return null
+  const copyText = str(raw.copyText)
+  if (capabilities.canCopy && (!copyText.trim() || !customerQuoteTotal || validityStatus !== 'verified')) return null
+  if (validityStatus === 'expired' && (capabilities.canCopy || !capabilities.canReverify)) return null
+
+  let explanation: RecommendationPlan['explanation']
+  if (raw.explanation !== undefined) {
+    if (!isObj(raw.explanation) || !str(raw.explanation.reason).trim()) return null
+    explanation = {
+      reason: str(raw.explanation.reason),
+      ...(str(raw.explanation.limitation).trim() ? { limitation: str(raw.explanation.limitation) } : {}),
+    }
+  }
+
+  return {
+    planId,
+    ...(str(raw.label).trim() ? { label: str(raw.label) } : {}),
+    ...(windowKey ? { windowKey } : {}),
+    windows,
+    journeys,
+    passengerGroups,
+    ticketGroups,
+    verifiedFareTotal,
+    ...(customerQuoteTotal ? { customerQuoteTotal } : {}),
+    verifiedAt,
+    validity: { status: validityStatus, validUntil },
+    ...(explanation ? { explanation } : {}),
+    copyText,
+    capabilities,
+  }
+}
+
+function parseRecommendations(raw: Record<string, unknown>): FlightRecommendations | null {
+  if (raw.resultType !== RECOMMENDATIONS_RESULT_TYPE || raw.schemaVersion !== RECOMMENDATIONS_SCHEMA_VERSION) return null
+  const status = raw.status
+  const coverageStatus = raw.coverageStatus
+  const budgetStatus = raw.budgetStatus
+  if (status !== 'loading' && status !== 'success' && status !== 'partial' && status !== 'empty' && status !== 'expired' && status !== 'fatal_error') return null
+  if (coverageStatus !== 'complete' && coverageStatus !== 'partial' && coverageStatus !== 'failed') return null
+  if (budgetStatus !== 'within_budget' && budgetStatus !== 'exhausted') return null
+  if (!Array.isArray(raw.plans) || raw.plans.length > MAX_RECOMMENDATION_PLANS) return null
+  const planBearing = status === 'success' || status === 'partial' || status === 'expired'
+  if (planBearing !== (raw.plans.length > 0)) return null
+  const plans = raw.plans.map(parseRecommendationPlan)
+  if (plans.some((plan) => !plan)) return null
+  const typedPlans = plans as RecommendationPlan[]
+  if (new Set(typedPlans.map((plan) => plan.planId)).size !== typedPlans.length) return null
+  if (status === 'expired' && typedPlans.some((plan) => plan.validity.status !== 'expired')) return null
+  if ((status === 'success' || status === 'partial') && typedPlans.some((plan) => plan.validity.status !== 'verified')) return null
+  if (!isObj(raw.capabilities)) return null
+  const { canRetry, canReverify, canCopy } = raw.capabilities
+  if (typeof canRetry !== 'boolean' || typeof canReverify !== 'boolean' || typeof canCopy !== 'boolean') return null
+  const capabilities = { canRetry, canReverify, canCopy }
+  const missingFareConstructions = raw.missingFareConstructions === undefined
+    ? undefined
+    : Array.isArray(raw.missingFareConstructions) && raw.missingFareConstructions.every(isFareSource)
+      ? raw.missingFareConstructions as FareSource[]
+      : null
+  if (missingFareConstructions === null) return null
+  if (raw.diagnostics !== undefined && !isObj(raw.diagnostics)) return null
+  return {
+    schemaVersion: RECOMMENDATIONS_SCHEMA_VERSION,
+    resultType: RECOMMENDATIONS_RESULT_TYPE,
+    status,
+    coverageStatus,
+    budgetStatus,
+    ...(str(raw.message).trim() ? { message: str(raw.message) } : {}),
+    ...(str(raw.reason).trim() ? { reason: str(raw.reason) } : {}),
+    ...(missingFareConstructions ? { missingFareConstructions } : {}),
+    ...(isObj(raw.diagnostics) ? { diagnostics: raw.diagnostics } : {}),
+    capabilities,
+    plans: typedPlans,
+  }
+}
+
+function invalidRecommendations(message = '推荐结果版本或必备字段不受支持，请重新生成推荐。'): FlightRecommendations {
+  return {
+    schemaVersion: RECOMMENDATIONS_SCHEMA_VERSION,
+    resultType: RECOMMENDATIONS_RESULT_TYPE,
+    status: 'fatal_error',
+    coverageStatus: 'failed',
+    budgetStatus: 'within_budget',
+    message,
+    reason: 'invalid_recommendation_contract',
+    capabilities: { canRetry: true, canReverify: false, canCopy: false },
+    plans: [],
+  }
+}
+
 function containsMarkdownTable(text: string): boolean {
   const lines = text.split('\n')
   return lines.some((line, index) => /^\s*\|.*\|\s*$/.test(line) && /^\s*\|?\s*:?-{3,}/.test(lines[index + 1] ?? ''))
@@ -397,6 +758,7 @@ export function derive(prompts: PromptContent[]): DerivedView {
   const chat: ChatBubble[] = []
   let search: SearchResult | null = null
   let fare: FareVerification | null = null
+  let recommendations: FlightRecommendations | null = null
   let notice: string | null = null
   let stage: Stage = 'idle'
   // Signature of the last rendered card set, so a re-surfaced identical compact (the verify
@@ -417,8 +779,12 @@ export function derive(prompts: PromptContent[]): DerivedView {
     let hasVersionedSearch = false
     let pendingFare: FareVerification | null = null
     let pendingProposal: FlightProposal | null = null
+    let pendingRecommendations: FlightRecommendations | null = null
+    const planBearingRecommendationSignatures = new Set<string>()
+    let conflictingRecommendationResults = false
     let successfulVerifyCount = 0
     let lastAssistantTextBubble: ChatBubble | null = null
+    const assistantTextBubbles: ChatBubble[] = []
 
     for (const f of p.frames) {
       const data = f.data
@@ -448,6 +814,7 @@ export function derive(prompts: PromptContent[]): DerivedView {
           const bubble: ChatBubble = { key, role: 'assistant', text, ts: replyTs }
           chat.push(bubble)
           lastAssistantTextBubble = bubble
+          assistantTextBubbles.push(bubble)
         }
       }
 
@@ -460,14 +827,36 @@ export function derive(prompts: PromptContent[]): DerivedView {
           if (!isObj(block) || block.type !== 'tool_result') continue
           const raw = textFromContent(block.content)
 
+          // The explicit recommendation contract is the sole primary result for
+          // this turn. An explicit but malformed/unknown version fails closed so
+          // search evidence or Agent prose cannot masquerade as the final answer.
+          if (raw.includes('"flight.recommendations"') || raw.includes('"flight-recommendations/')) {
+            const payload = parseToolJson(raw)
+            const parsed = payload ? parseRecommendations(payload) : null
+            if (parsed?.plans.length) {
+              planBearingRecommendationSignatures.add(parsed.plans.map((plan) => plan.planId).sort().join('|'))
+              conflictingRecommendationResults = planBearingRecommendationSignatures.size > 1
+            }
+            pendingRecommendations = conflictingRecommendationResults
+              ? invalidRecommendations('本次运行返回了多个独立的推荐结果，无法确定它们是否共同覆盖原始请求。请用一个完整行程请求重新生成推荐。')
+              : parsed ?? invalidRecommendations()
+            recommendations = pendingRecommendations
+            pendingProposal = null
+            fare = null
+            pendingFare = null
+            notice = null
+            stage = 'recommendation'
+            continue
+          }
+
           // A proposal is the only customer-facing summary for this turn. It
           // replaces all search/pricing tables used to assemble the plan.
           if (raw.includes('"flight.proposal"')) {
             const payload = parseToolJson(raw)
             const parsed = payload && parseProposal(payload)
-            if (parsed) {
+            if (parsed && !pendingRecommendations) {
               pendingProposal = parsed
-              pendingSearches = []
+              recommendations = null
               continue
             }
           }
@@ -484,7 +873,10 @@ export function derive(prompts: PromptContent[]): DerivedView {
             const parsed = payload && parseCompactSearch(payload)
             if (parsed) {
               if (payload?.resultType === 'flight.search') hasVersionedSearch = true
-              search = parsed; fare = null; notice = null; stage = 'search'
+              search = parsed
+              if (!pendingRecommendations) {
+                fare = null; recommendations = null; notice = null; stage = 'search'
+              }
               // Signature covers every option's full itinerary (all legs, all segments, dates), not
               // just the first flight — otherwise two different multi-leg searches that share a first
               // leg (e.g. both start MU0583) collide and the second table is silently dropped.
@@ -504,7 +896,9 @@ export function derive(prompts: PromptContent[]): DerivedView {
           if (raw.includes('"flight.verify"') || (raw.includes('"verifiedOption"') && raw.includes('"selectedOption"'))) {
             const payload = parseToolJson(raw)
             if (!payload) continue
+            if (pendingRecommendations) continue
             fare = null
+            recommendations = null
             pendingFare = null
             stage = search ? 'search' : 'idle'
             if (payload.ok !== true) {
@@ -528,7 +922,20 @@ export function derive(prompts: PromptContent[]): DerivedView {
     // Domain cards render at the turn tail so a retry/ack text frame cannot consume them before the
     // real final answer arrives. Keep each compact search as its own table; merging multi-leg or
     // multi-request searches into one giant table makes unrelated trip segments indistinguishable.
-    if (pendingProposal) {
+    if (pendingRecommendations) {
+      for (const bubble of assistantTextBubbles) bubble.text = stripMarkdownTables(bubble.text)
+      fare = null
+      pendingFare = null
+      stage = 'recommendation'
+      chat.push({
+        key: `recommendations-${p.id}`,
+        role: 'assistant',
+        text: '',
+        recommendations: pendingRecommendations,
+        evidence: pendingSearches,
+        ts: replyTs,
+      })
+    } else if (pendingProposal) {
       if (lastAssistantTextBubble) lastAssistantTextBubble.text = stripMarkdownTables(lastAssistantTextBubble.text)
       chat.push({ key: `proposal-${p.id}`, role: 'assistant', text: '', proposal: pendingProposal, ts: replyTs })
     } else if (pendingSearches.length && (hasVersionedSearch || !(lastAssistantTextBubble && containsMarkdownTable(lastAssistantTextBubble.text)))) {
@@ -550,12 +957,12 @@ export function derive(prompts: PromptContent[]): DerivedView {
     // A turn that verifies several options is an agent comparison, not a single actionable fare.
     // Rendering the last successful verify as "the" fare card surfaces arbitrary alternatives
     // (for example WN3888) after the agent already summarized the real choice in text.
-    if (successfulVerifyCount > 1) {
+    if (!pendingRecommendations && successfulVerifyCount > 1) {
       fare = null
       pendingFare = null
       stage = search ? 'search' : 'idle'
     }
-    if (pendingFare && successfulVerifyCount === 1) {
+    if (!pendingRecommendations && pendingFare && successfulVerifyCount === 1) {
       chat.push({ key: `fare-${p.id}`, role: 'assistant', text: '', fare: pendingFare, ts: replyTs })
     }
   }
@@ -564,10 +971,10 @@ export function derive(prompts: PromptContent[]): DerivedView {
   const deduped: ChatBubble[] = []
   for (const b of chat) {
     const prev = deduped[deduped.length - 1]
-    if (!b.cards && !b.fare && !b.proposal && !b.attachments && prev && prev.role === b.role && prev.text === b.text && prev.runUrl === b.runUrl && !prev.cards && !prev.fare && !prev.proposal && !prev.attachments) continue
+    if (!b.cards && !b.fare && !b.proposal && !b.recommendations && !b.attachments && prev && prev.role === b.role && prev.text === b.text && prev.runUrl === b.runUrl && !prev.cards && !prev.fare && !prev.proposal && !prev.recommendations && !prev.attachments) continue
     deduped.push(b)
   }
-  return { chat: deduped, stage, search, fare, notice }
+  return { chat: deduped, stage, search, fare, recommendations, notice }
 }
 
 function parseToolJson(raw: string): Record<string, unknown> | null {
