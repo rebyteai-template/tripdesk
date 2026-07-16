@@ -107,6 +107,40 @@ export interface SearchCoverage {
   missing: FareSource[]
 }
 
+// ── customer proposal (one OP card, one row per physical itinerary) ─────
+// Search/pricing results are intermediate workbench evidence. A proposal is
+// the deliberately selected outbound/return plan: the flight facts appear once
+// and all cabin/passenger prices live inside that flight row.
+export interface ProposalFareLine {
+  passengers: number
+  passengerType: string
+  cabin: string
+  baggage: string
+  unitPrice: number
+  subtotal: number
+}
+export interface ProposalItinerary {
+  origin: string
+  destination: string
+  duration: string
+  transferCount: number
+  segments: CompactSegment[]
+}
+export interface ProposalJourney {
+  role: JourneyRole
+  itinerary: ProposalItinerary
+  fares: ProposalFareLine[]
+  subtotal: number
+}
+export interface FlightProposal {
+  schemaVersion: 'flight-proposal/v1'
+  title: string
+  journeys: ProposalJourney[]
+  total: { amount: number; currency: string }
+  copyText: string
+  capabilities: { canCopy: boolean; canBook: boolean }
+}
+
 // ── verify (simplifly-flyai-skill CLI JSON) ──────────
 // Versioned results are decoded by schema and result type. A shape-based legacy
 // adapter remains for saved history, but it never enables copy or booking actions.
@@ -201,6 +235,9 @@ export interface ChatBubble {
    *  `cards`. The latest verify's fare is the SAME object as `DerivedView.fare`, so the panel
    *  shows the "继续预订" CTA only on that one (`b.fare === view.fare`). */
   fare?: FareVerification
+  /** Final selected customer proposal. Its presence suppresses every search/pricing
+   *  table produced while the agent assembled it. */
+  proposal?: FlightProposal
   /** Images/files the user attached to this turn — rendered above the user bubble (thumbnails /
    *  file chips). Set only on user bubbles, only when non-empty. */
   attachments?: Attachment[]
@@ -262,6 +299,100 @@ function parseCapabilities(raw: unknown): NonNullable<CompactOption['capabilitie
   return { canCopy: raw.canCopy === true, canBook: raw.canBook === true }
 }
 
+function parseProposal(raw: Record<string, unknown>): FlightProposal | null {
+  if (raw.resultType !== 'flight.proposal' || raw.schemaVersion !== 'flight-proposal/v1' || raw.ok !== true) return null
+  if (!Array.isArray(raw.journeys) || !raw.journeys.length || !isObj(raw.total)) return null
+  const journeys: ProposalJourney[] = []
+  for (const rawJourney of raw.journeys) {
+    if (!isObj(rawJourney) || !isObj(rawJourney.itinerary) || !Array.isArray(rawJourney.fares)) return null
+    const itinerary = rawJourney.itinerary
+    if (!Array.isArray(itinerary.segments) || !itinerary.segments.length) return null
+    const segments: CompactSegment[] = []
+    for (const rawSegment of itinerary.segments) {
+      if (!isObj(rawSegment)) return null
+      const segment: CompactSegment = {
+        flightNo: str(rawSegment.flightNo),
+        departure: str(rawSegment.departure),
+        departureDate: str(rawSegment.departureDate),
+        departureTime: str(rawSegment.departureTime),
+        arrival: str(rawSegment.arrival),
+        arrivalDate: str(rawSegment.arrivalDate),
+        arrivalTime: str(rawSegment.arrivalTime),
+        cabin: str(rawSegment.cabin),
+        ...(typeof rawSegment.departureName === 'string' ? { departureName: rawSegment.departureName } : {}),
+        ...(typeof rawSegment.departureTerminal === 'string' ? { departureTerminal: rawSegment.departureTerminal } : {}),
+        ...(typeof rawSegment.arrivalName === 'string' ? { arrivalName: rawSegment.arrivalName } : {}),
+        ...(typeof rawSegment.arrivalTerminal === 'string' ? { arrivalTerminal: rawSegment.arrivalTerminal } : {}),
+        ...(typeof rawSegment.flightTime === 'string' ? { flightTime: rawSegment.flightTime } : {}),
+        ...(typeof rawSegment.checkedBaggage === 'string' ? { checkedBaggage: rawSegment.checkedBaggage } : {}),
+      }
+      if (!segment.flightNo || !segment.departure || !segment.arrival || !segment.departureDate) return null
+      segments.push(segment)
+    }
+    const fares: ProposalFareLine[] = []
+    for (const rawFare of rawJourney.fares) {
+      if (!isObj(rawFare)) return null
+      const fare = {
+        passengers: num(rawFare.passengers),
+        passengerType: str(rawFare.passengerType),
+        cabin: str(rawFare.cabin),
+        baggage: str(rawFare.baggage),
+        unitPrice: num(rawFare.unitPrice),
+        subtotal: num(rawFare.subtotal),
+      }
+      if (fare.passengers <= 0 || fare.unitPrice <= 0 || !fare.cabin) return null
+      fares.push(fare)
+    }
+    const role = rawJourney.role
+    if (role !== 'oneway' && role !== 'outbound' && role !== 'inbound' && role !== 'leg') return null
+    journeys.push({
+      role,
+      itinerary: {
+        origin: str(itinerary.origin),
+        destination: str(itinerary.destination),
+        duration: str(itinerary.duration),
+        transferCount: num(itinerary.transferCount),
+        segments,
+      },
+      fares,
+      subtotal: num(rawJourney.subtotal),
+    })
+  }
+  const capabilities = parseCapabilities(raw.capabilities)
+  const proposal: FlightProposal = {
+    schemaVersion: 'flight-proposal/v1',
+    title: str(raw.title) || '报价方案',
+    journeys,
+    total: { amount: num(raw.total.amount), currency: str(raw.total.currency) },
+    copyText: str(raw.copyText),
+    capabilities: capabilities ?? { canCopy: false, canBook: false },
+  }
+  return proposal.total.amount > 0 && proposal.total.currency && proposal.copyText ? proposal : null
+}
+
+function containsMarkdownTable(text: string): boolean {
+  const lines = text.split('\n')
+  return lines.some((line, index) => /^\s*\|.*\|\s*$/.test(line) && /^\s*\|?\s*:?-{3,}/.test(lines[index + 1] ?? ''))
+}
+
+function stripMarkdownTables(text: string): string {
+  const lines = text.split('\n')
+  const kept: string[] = []
+  let inTable = false
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? ''
+    const tableStart = /^\s*\|.*\|\s*$/.test(line) && /^\s*\|?\s*:?-{3,}/.test(lines[index + 1] ?? '')
+    if (tableStart) {
+      inTable = true
+      continue
+    }
+    if (inTable && /^\s*\|.*\|\s*$/.test(line)) continue
+    if (inTable) inTable = false
+    kept.push(line)
+  }
+  return kept.join('\n').replace(/\n{3,}/g, '\n\n').trim()
+}
+
 export function derive(prompts: PromptContent[]): DerivedView {
   const chat: ChatBubble[] = []
   let search: SearchResult | null = null
@@ -284,7 +415,9 @@ export function derive(prompts: PromptContent[]): DerivedView {
     // redundant markdown table), else flush as a standalone card bubble at prompt end.
     let pendingSearches: SearchResult[] = []
     let pendingFare: FareVerification | null = null
+    let pendingProposal: FlightProposal | null = null
     let successfulVerifyCount = 0
+    let lastAssistantTextBubble: ChatBubble | null = null
 
     for (const f of p.frames) {
       const data = f.data
@@ -313,6 +446,7 @@ export function derive(prompts: PromptContent[]): DerivedView {
           const key = `a-${p.id}-${(data.message as Record<string, unknown>).id ?? f.seq}-${f.seq}`
           const bubble: ChatBubble = { key, role: 'assistant', text, ts: replyTs }
           chat.push(bubble)
+          lastAssistantTextBubble = bubble
         }
       }
 
@@ -325,9 +459,27 @@ export function derive(prompts: PromptContent[]): DerivedView {
           if (!isObj(block) || block.type !== 'tool_result') continue
           const raw = textFromContent(block.content)
 
+          // A proposal is the only customer-facing summary for this turn. It
+          // replaces all search/pricing tables used to assemble the plan.
+          if (raw.includes('"flight.proposal"')) {
+            const payload = parseToolJson(raw)
+            const parsed = payload && parseProposal(payload)
+            if (parsed) {
+              pendingProposal = parsed
+              pendingSearches = []
+              continue
+            }
+          }
+
+          // Pricing is intermediate evidence, never a search table. Older
+          // payloads lacked this discriminator and remain handled by the legacy
+          // shape adapter below for saved history only.
+          if (raw.includes('"flight.pricing"')) continue
+
           // compact search — cheap signature gate before parsing the (large) JSON
           if (raw.includes('"displayOptions"') && raw.includes('"displayMapping"')) {
             const payload = parseToolJson(raw)
+            if (payload?.resultType && payload.resultType !== 'flight.search') continue
             const parsed = payload && parseCompactSearch(payload)
             if (parsed) {
               search = parsed; fare = null; notice = null; stage = 'search'
@@ -374,7 +526,10 @@ export function derive(prompts: PromptContent[]): DerivedView {
     // Domain cards render at the turn tail so a retry/ack text frame cannot consume them before the
     // real final answer arrives. Keep each compact search as its own table; merging multi-leg or
     // multi-request searches into one giant table makes unrelated trip segments indistinguishable.
-    if (pendingSearches.length) {
+    if (pendingProposal) {
+      if (lastAssistantTextBubble) lastAssistantTextBubble.text = stripMarkdownTables(lastAssistantTextBubble.text)
+      chat.push({ key: `proposal-${p.id}`, role: 'assistant', text: '', proposal: pendingProposal, ts: replyTs })
+    } else if (pendingSearches.length && !(lastAssistantTextBubble && containsMarkdownTable(lastAssistantTextBubble.text))) {
       pendingSearches.forEach((searchResult, index) => {
         chat.push({
           key: `cards-${p.id}-${index}`,
@@ -404,7 +559,7 @@ export function derive(prompts: PromptContent[]): DerivedView {
   const deduped: ChatBubble[] = []
   for (const b of chat) {
     const prev = deduped[deduped.length - 1]
-    if (!b.cards && !b.fare && !b.attachments && prev && prev.role === b.role && prev.text === b.text && prev.runUrl === b.runUrl && !prev.cards && !prev.fare && !prev.attachments) continue
+    if (!b.cards && !b.fare && !b.proposal && !b.attachments && prev && prev.role === b.role && prev.text === b.text && prev.runUrl === b.runUrl && !prev.cards && !prev.fare && !prev.proposal && !prev.attachments) continue
     deduped.push(b)
   }
   return { chat: deduped, stage, search, fare, notice }

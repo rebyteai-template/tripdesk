@@ -196,6 +196,72 @@ test('derive preserves multiple compact searches in one turn', () => {
   assert.equal(latestSearch.journeys[0]?.segments[0]?.flightNo, 'JL0022')
 })
 
+test('a final proposal replaces search and pricing tables with one OP card', () => {
+  const search = compactSearch(1, 'CA165', 14932) as Record<string, unknown>
+  search.schemaVersion = 'flight-search/v1'
+  search.resultType = 'flight.search'
+  const pricing = compactSearch(6, 'CA165', 14932) as Record<string, unknown>
+  pricing.schemaVersion = 'flight-pricing/v1'
+  pricing.resultType = 'flight.pricing'
+  const proposal = {
+    schemaVersion: 'flight-proposal/v1',
+    resultType: 'flight.proposal',
+    ok: true,
+    title: '客户报价方案',
+    journeys: [
+      {
+        role: 'outbound',
+        itinerary: {
+          origin: 'PEK', destination: 'MEL', duration: '11h25m', transferCount: 0,
+          segments: [{
+            flightNo: 'CA165', departure: 'PEK', departureName: '北京首都', departureTerminal: 'T3',
+            departureDate: '2026-08-14', departureTime: '01:00', arrival: 'MEL', arrivalName: '墨尔本',
+            arrivalTerminal: 'T2', arrivalDate: '2026-08-14', arrivalTime: '14:25', cabin: '商务 Z舱',
+          }],
+        },
+        fares: [
+          { passengers: 1, passengerType: 'adult', cabin: '商务 Z舱', baggage: '托运2*32kg', unitPrice: 13255, subtotal: 13255 },
+          { passengers: 3, passengerType: 'adult', cabin: '经济 T舱', baggage: '托运1*23kg', unitPrice: 3809, subtotal: 11427 },
+        ],
+        subtotal: 24682,
+      },
+      {
+        role: 'inbound',
+        itinerary: {
+          origin: 'SYD', destination: 'HKG', duration: '9h55m', transferCount: 0,
+          segments: [{
+            flightNo: 'HX18', departure: 'SYD', departureName: '悉尼', departureTerminal: 'T1',
+            departureDate: '2026-08-24', departureTime: '11:15', arrival: 'HKG', arrivalName: '香港',
+            arrivalTerminal: 'T1', arrivalDate: '2026-08-24', arrivalTime: '19:10', cabin: '商务 I舱',
+          }],
+        },
+        fares: [
+          { passengers: 1, passengerType: 'adult', cabin: '商务 I舱', baggage: '托运2*32kg', unitPrice: 15145, subtotal: 15145 },
+          { passengers: 3, passengerType: 'adult', cabin: '经济 W舱', baggage: '托运1*23kg', unitPrice: 2141, subtotal: 6423 },
+        ],
+        subtotal: 21568,
+      },
+    ],
+    total: { amount: 46250, currency: 'CNY' },
+    copyText: '1. CA165\n1人 商务 Z舱\n3人 经济 T舱\n\n2. HX18\n1人 商务 I舱\n3人 经济 W舱',
+    capabilities: { canCopy: true, canBook: false },
+  }
+  const prompt = promptWithToolResult('')
+  prompt.frames = [
+    { seq: 1, data: { type: 'user', message: { content: [{ type: 'tool_result', content: JSON.stringify(search) }] } } },
+    { seq: 2, data: { type: 'user', message: { content: [{ type: 'tool_result', content: JSON.stringify(pricing) }] } } },
+    { seq: 3, data: { type: 'assistant', message: { content: [{ type: 'text', text: '最终如下\n\n| 航班 | 价格 |\n| --- | --- |\n| CA165 | ¥13255 |' }] } } },
+    { seq: 4, data: { type: 'user', message: { content: [{ type: 'tool_result', content: JSON.stringify(proposal) }] } } },
+  ]
+
+  const view = derive([prompt])
+  assert.equal(view.chat.filter((bubble) => bubble.cards).length, 0)
+  assert.equal(view.chat.filter((bubble) => bubble.proposal).length, 1)
+  assert.equal(view.chat.find((bubble) => bubble.proposal)?.proposal?.journeys.length, 2)
+  assert.equal(view.chat.find((bubble) => bubble.proposal)?.proposal?.journeys[0]?.fares.length, 2)
+  assert.equal(view.chat.find((bubble) => bubble.text.includes('最终如下'))?.text, '最终如下')
+})
+
 function compactVerify(flightNo: string, amount: number) {
   return {
     schemaVersion: 'flight-verify/v1',
