@@ -143,6 +143,10 @@ function recommendationsResult() {
           {
             ticketGroupId: 'business-joint', passengerGroupId: 'business', journeyIndexes: [0, 1],
             fareSource: 'joint', source: 'meiya', cabin: '商务 Z/I舱', baggage: '托运2*32kg',
+            segmentFacts: [
+              { journeyIndex: 0, segmentIndex: 0, cabin: '商务 Z舱', baggage: '托运2*32kg' },
+              { journeyIndex: 1, segmentIndex: 0, cabin: '商务 I舱', baggage: '托运2*32kg' },
+            ],
             exactPassengerCount: { adult: 1, child: 0, infant: 0 },
             verifiedPrice: { amount: 28400, currency: 'CNY' },
             verifiedAt: '2099-07-16T05:00:00.000Z',
@@ -151,6 +155,7 @@ function recommendationsResult() {
           {
             ticketGroupId: 'economy-outbound', passengerGroupId: 'economy', journeyIndexes: [0],
             fareSource: 'oneway', source: 'meiya', cabin: '经济 T舱', baggage: '托运1*23kg',
+            segmentFacts: [{ journeyIndex: 0, segmentIndex: 0, cabin: '经济 T舱', baggage: '托运1*23kg' }],
             exactPassengerCount: { adult: 3, child: 0, infant: 0 },
             verifiedPrice: { amount: 11427, currency: 'CNY' },
             verifiedAt: '2099-07-16T05:00:00.000Z',
@@ -159,6 +164,7 @@ function recommendationsResult() {
           {
             ticketGroupId: 'economy-inbound', passengerGroupId: 'economy', journeyIndexes: [1],
             fareSource: 'oneway', source: 'yinling', cabin: '经济 W舱', baggage: '托运1*23kg',
+            segmentFacts: [{ journeyIndex: 1, segmentIndex: 0, cabin: '经济 W舱', baggage: '托运1*23kg' }],
             exactPassengerCount: { adult: 3, child: 0, infant: 0 },
             verifiedPrice: { amount: 6423, currency: 'CNY' },
             verifiedAt: '2099-07-16T05:00:00.000Z',
@@ -388,6 +394,7 @@ test('a recommendation result is authoritative regardless of frame order and ret
   assert.equal(view.recommendations?.alternateCoverageStatus, 'failed')
   assert.equal(view.recommendations?.plans[0]?.journeys[1]?.routeOptionId, 'hong-kong')
   assert.equal(view.recommendations?.plans[0]?.journeys[1]?.routePriority, 'alternate')
+  assert.equal(view.recommendations?.plans[0]?.ticketGroups[0]?.segmentFacts?.[1]?.cabin, '商务 I舱')
   assert.equal(view.chat.filter((bubble) => bubble.recommendations).length, 1)
   assert.equal(view.chat.some((bubble) => bubble.cards || bubble.fare || bubble.proposal), false)
   assert.equal(view.chat.find((bubble) => bubble.recommendations)?.evidence?.length, 1)
@@ -478,6 +485,26 @@ test('malformed explicit recommendation results fail closed instead of falling t
       value.plans[0]!.ticketGroups[0]!.exactPassengerCount.adult = 2
       return value
     })(),
+    (() => {
+      const value = structuredClone(recommendationsResult())
+      value.plans[0]!.ticketGroups[0]!.segmentFacts![1]!.segmentIndex = 99
+      return value
+    })(),
+    (() => {
+      const value = structuredClone(recommendationsResult())
+      value.plans[0]!.ticketGroups[0]!.segmentFacts!.pop()
+      return value
+    })(),
+    (() => {
+      const value = structuredClone(recommendationsResult())
+      value.plans[0]!.ticketGroups[0]!.segmentFacts![1] = structuredClone(value.plans[0]!.ticketGroups[0]!.segmentFacts![0]!)
+      return value
+    })(),
+    (() => {
+      const value = structuredClone(recommendationsResult())
+      value.plans[0]!.ticketGroups[1]!.segmentFacts![0]!.journeyIndex = 1
+      return value
+    })(),
   ]
 
   for (const payload of invalidPayloads) {
@@ -549,6 +576,14 @@ test('recommendation windowKey is optional and the ten-plan cap is inclusive', (
   assert.equal(view.recommendations?.status, 'success')
   assert.equal(view.recommendations?.plans.length, 10)
   assert.equal(view.recommendations?.plans[0]?.windowKey, undefined)
+})
+
+test('saved v1 recommendations without segment facts remain readable as legacy history', () => {
+  const payload = structuredClone(recommendationsResult())
+  for (const ticket of payload.plans[0]!.ticketGroups) delete (ticket as { segmentFacts?: unknown }).segmentFacts
+  const view = derive([promptWithToolResult(JSON.stringify(payload))])
+  assert.equal(view.recommendations?.status, 'success')
+  assert.equal(view.recommendations?.plans[0]?.ticketGroups[0]?.segmentFacts, undefined)
 })
 
 test('non-plan recommendation states parse without reviving search evidence as primary output', () => {

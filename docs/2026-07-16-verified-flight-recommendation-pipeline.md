@@ -186,8 +186,9 @@ TravelKit 按 `schemaVersion` 和 `resultType` 识别最终推荐，并校验：
 - 旧 search results 仅作为折叠、只读的中间证据保留。
 - Agent Markdown 中的表格不会覆盖或重复最终推荐。
 - TravelKit 按 Skill 给出的 plan 顺序全部渲染；相同时间窗的不同 plans 不会被合并。
-- 每个 journey 的物理航班只显示一次，商务和经济等 passenger/cabin 价格附着在同一 journey 下。
-- ticket groups 单独显示 fare source、covered journeys 和总价。
+- 所有 plans 在同一张高密度对比表中按 Skill 顺序渲染；一个物理 segment 一行，方案、ticket group 和 journey 事实只在各自覆盖范围的第一行出现。
+- 每个 journey 的物理航班只显示一次；商务和经济等 passenger group 使用 ticket group 的 `segmentFacts` 展示精确分段舱位和行李。某段数据缺失时显示 `未返回`，不使用 ticket 或 journey 汇总字段兜底。
+- ticket groups 在查询 / 票价列中单独显示 fare source、covered journeys、渠道和总价；往返或联合票价格不会拆写到单个 journey。
 - Copy 只使用 plan 自带的 `copyText`，并由 `capabilities.canCopy` 控制。
 - UI 不按价格、经停、时间窗或本地时钟删除、合并、重排方案。
 - UI 不根据 `partial` 或 `budgetStatus` 自行生成“不是最低价”等业务说明；只有 Skill 明确提供 `message` 或 `reason` 时才展示说明。

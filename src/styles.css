@@ -5,12 +5,14 @@
   --panel: var(--kami-ivory);
   --panel-2: var(--kami-sand);
   --border: var(--kami-border);
+  --border-strong: var(--kami-border-2);
   --text: var(--kami-ink);
   --muted: var(--kami-olive);          /* olive (not stone): secondary text stays ≥4.5:1 on parchment */
   --accent: var(--kami-brand);
   --accent-soft: var(--kami-brand-pale);
   --good: var(--kami-success);
   --good-soft: var(--kami-success-pale);
+  --good-border: var(--kami-success-border);
   --warn: var(--kami-warning);
   --warn-soft: var(--kami-warning-pale);
   --warn-border: var(--kami-warning-border);
@@ -343,8 +345,7 @@ tr.cheapest td { background: var(--good-soft); }
 .proposal-table tfoot td { background: var(--panel-2); }
 .proposal-total { color: var(--accent); font-size: 16px; font-weight: 800; white-space: nowrap; }
 
-/* Versioned recommendation result: intentionally card-based so physical journeys
-   and ticket groups stay readable in one column without a wide comparison table. */
+/* Versioned recommendation result */
 .recommendations { align-self: stretch; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .recommendations-state {
   display: flex; align-items: center; justify-content: space-between; gap: 16px;
@@ -359,38 +360,60 @@ tr.cheapest td { background: var(--good-soft); }
   border-radius: var(--radius-sm); padding: 7px 12px; cursor: pointer; font-weight: 700;
 }
 .recommendations-state button:disabled, .recommend-actions button:disabled { opacity: .5; cursor: default; }
-.recommend-kicker { color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .04em; }
-.recommend-plan-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
-.recommend-plan {
-  min-width: 0; padding: 18px; border: 1px solid var(--border); border-radius: var(--radius-lg);
-  background: var(--panel); box-shadow: 0 1px 2px rgba(20, 20, 19, .04);
+.recommend-table-scroll { width: 100%; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--panel); }
+.recommend-table { min-width: 1760px; border: 0; border-collapse: separate; border-spacing: 0; border-radius: 0; table-layout: fixed; }
+.recommend-table th, .recommend-table td {
+  padding: 8px 9px; vertical-align: top; border-bottom: 0; border-right: 1px solid var(--border);
+  font-size: 12px; line-height: 1.4;
 }
-.recommend-plan-head { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 12px 18px; }
-.recommend-plan-head h3 { margin: 2px 0 5px; font-size: 18px; }
-.recommend-validity { display: inline-flex; padding: 2px 7px; border-radius: var(--radius-pill); background: var(--good-soft); color: var(--good); font-size: 11px; font-weight: 700; }
-.recommend-validity.is-expired { background: var(--warn-soft); color: var(--warn); }
-.recommend-plan-total { text-align: right; white-space: nowrap; }
-.recommend-plan-total strong { display: block; color: var(--accent); font-size: 20px; }
-.recommend-plan-total span { display: block; color: var(--muted); font-size: 11px; }
-.recommend-actions { display: flex; align-items: flex-start; }
-.recommend-copy { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
-.recommend-copy-fallback { display: flex; flex-direction: column; gap: 4px; width: min(360px, 70vw); font-size: 12px; color: var(--err); }
+.recommend-table tr > :last-child { border-right: 0; }
+.recommend-table thead th { white-space: nowrap; border-bottom: 1px solid var(--border); }
+.recommend-table thead th:nth-child(1) { width: 180px; }
+.recommend-table thead th:nth-child(2) { width: 130px; }
+.recommend-table thead th:nth-child(3) { width: 82px; }
+.recommend-table thead th:nth-child(4) { width: 84px; }
+.recommend-table thead th:nth-child(5) { width: 260px; }
+.recommend-table thead th:nth-child(6) { width: 118px; }
+.recommend-table thead th:nth-child(7) { width: 92px; }
+.recommend-table thead th:nth-child(8) { width: 180px; }
+.recommend-table thead th:nth-child(9) { width: 210px; }
+.recommend-table thead th:nth-child(10) { width: 220px; }
+.recommend-table thead th:nth-child(11) { width: 105px; }
+.recommend-table thead th:nth-child(12) { width: 160px; }
+.recommend-segment-row + .recommend-segment-row > * { border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent); }
+.recommend-segment-row.is-journey-start:not(:first-child) > * { border-top-color: var(--border); }
+.recommend-plan-cell, .recommend-journey-cell, .recommend-total-cell { background: var(--panel); font-weight: 400; }
+.recommend-plan-group:nth-of-type(even) > tr > * {
+  background: color-mix(in srgb, var(--panel-2) 48%, var(--panel));
+}
+.recommend-plan-summary { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; min-width: 0; }
+.recommend-plan-label { color: var(--text); font-size: 14px; }
+.recommend-plan-journeys { margin: 1px 0 2px; padding-left: 18px; color: var(--muted); font-size: 12px; line-height: 1.55; }
+.recommend-plan-journeys li { padding-left: 1px; }
+.recommend-plan-journeys li span + span { margin-left: 6px; }
+.recommend-validity { display: inline-flex; padding: 2px 7px; border-radius: var(--radius-pill); background: var(--warn-soft); color: var(--warn); font-size: 11px; font-weight: 700; }
+.recommend-actions { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 5px; margin-top: 2px; }
+.recommend-copy { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.recommend-copy-fallback { display: flex; flex-direction: column; gap: 4px; width: 240px; font-size: 12px; color: var(--err); }
 .recommend-copy-fallback textarea { width: 100%; min-height: 90px; resize: vertical; color: var(--text); background: var(--panel-2); border: 1px solid var(--err-border); border-radius: var(--radius-sm); padding: 8px; }
-.recommend-journeys { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
-.recommend-journey { padding: 13px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--panel-2); }
-.recommend-journey-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.recommend-journey-head h4, .recommend-tickets h4 { margin: 0; font-size: 14px; }
-.recommend-journey-head > span { color: var(--muted); font-size: 12px; }
-.recommend-route-priority { display: inline-block; margin-left: 7px; padding: 1px 7px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 700; }
-.recommend-flight-facts { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 6px; font-size: 13px; }
-.recommend-flight-facts span:last-child { flex-basis: 100%; color: var(--muted); overflow-wrap: anywhere; }
-.recommend-cabin-lines { display: flex; flex-direction: column; gap: 5px; margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--border); }
-.recommend-cabin-lines > div { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; }
-.recommend-tickets { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
-.recommend-ticket-row { display: flex; justify-content: space-between; gap: 16px; margin-top: 7px; font-size: 12px; }
-.recommend-ticket-row > span { min-width: 0; overflow-wrap: anywhere; }
-.recommend-ticket-row > strong { white-space: nowrap; }
-.recommend-explanation { margin: 13px 0 0; padding: 10px 12px; border-left: 3px solid var(--accent); background: var(--accent-soft); font-size: 13px; }
+.recommend-journey-cell { white-space: nowrap; }
+.recommend-journey-summary { display: flex; align-items: baseline; }
+.recommend-journey-summary span { color: var(--muted); }
+.recommend-flight-cell, .recommend-date-cell, .recommend-route-cell, .recommend-time-cell,
+.recommend-duration-cell, .recommend-cabin-cell, .recommend-baggage-cell, .recommend-total-cell,
+.recommend-channel-cell { white-space: nowrap; }
+.recommend-date-cell, .recommend-time-cell { color: var(--muted); }
+.recommend-detail-lines, .recommend-ticket-lines { display: flex; flex-direction: column; gap: 5px; }
+.recommend-detail-lines > div, .recommend-ticket-lines > div { min-height: 22px; display: flex; align-items: center; gap: 3px; }
+.recommend-detail-lines span, .recommend-channel-lines span { color: var(--muted); }
+.recommend-price-lines > div { gap: 6px; }
+.recommend-source-badge {
+  display: inline-flex; padding: 1px 5px; border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm); background: var(--panel-2); color: var(--text); font-size: 10px; font-weight: 800;
+}
+.recommend-source-badge.is-joint { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.recommend-fare-price, .recommend-total-cell strong { color: var(--accent); white-space: nowrap; }
+.recommend-total-cell strong { font-size: 14px; }
 .recommend-evidence { border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--panel); }
 .recommend-evidence > summary { padding: 10px 13px; cursor: pointer; color: var(--muted); font-weight: 600; }
 .recommend-evidence-list { display: flex; flex-direction: column; gap: 14px; padding: 0 13px 13px; }
@@ -540,13 +563,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 @media (max-width: 820px) {
   .recommendations-state { align-items: flex-start; flex-direction: column; }
-  .recommend-plan { padding: 14px; }
-  .recommend-plan-head { grid-template-columns: minmax(0, 1fr) auto; }
-  .recommend-actions { grid-column: 1 / -1; }
-  .recommend-plan-total { text-align: right; }
-  .recommend-cabin-lines > div, .recommend-ticket-row { flex-direction: column; gap: 2px; }
-  .recommend-copy { align-items: flex-start; width: 100%; }
-  .recommend-copy-fallback { width: 100%; }
+  .recommend-copy-fallback { width: 220px; }
 }
 
 /* Unauthorized gate page (shown when the embed handoff is missing/invalid). */

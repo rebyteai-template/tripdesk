@@ -194,10 +194,18 @@ export interface RecommendationTicketGroup {
   source?: string
   cabin?: string
   baggage?: string
+  segmentFacts?: RecommendationTicketSegmentFact[]
   exactPassengerCount: { adult: number; child: number; infant: number }
   verifiedAt: string
   validity: { status: RecommendationValidityStatus; validUntil: string }
   verifiedPrice: CompactPrice
+}
+
+export interface RecommendationTicketSegmentFact {
+  journeyIndex: number
+  segmentIndex: number
+  cabin?: string
+  baggage?: string
 }
 
 export interface RecommendationPlan {
@@ -587,9 +595,10 @@ function parseRecommendationPlan(raw: unknown): RecommendationPlan | null {
     const ticketGroupId = str(item.ticketGroupId).trim()
     const passengerGroupId = str(item.passengerGroupId).trim()
     if (!ticketGroupId || ticketGroupIds.has(ticketGroupId) || !passengerGroupIds.has(passengerGroupId)) return null
-    const journeyIndexes = item.journeyIndexes
+    const journeyIndexes = item.journeyIndexes as number[]
     if (journeyIndexes.some((value) => typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value >= journeys.length)) return null
-    if (new Set(journeyIndexes).size !== journeyIndexes.length) return null
+    const journeyIndexSet = new Set(journeyIndexes)
+    if (journeyIndexSet.size !== journeyIndexes.length) return null
     const verifiedPrice = parsePositivePrice(item.verifiedPrice)
     if (!verifiedPrice) return null
     const exactPassengerCount = parseRecommendationPassengerCount(item.exactPassengerCount)
@@ -605,15 +614,45 @@ function parseRecommendationPlan(raw: unknown): RecommendationPlan | null {
     const validUntil = str(item.validity.validUntil)
     if ((validityStatus !== 'verified' && validityStatus !== 'expired') || !validUntil || !Number.isFinite(Date.parse(validUntil))) return null
     if (Date.parse(validUntil) <= Date.parse(verifiedAt)) return null
+    let segmentFacts: RecommendationTicketSegmentFact[] | undefined
+    if (item.segmentFacts !== undefined) {
+      if (!Array.isArray(item.segmentFacts)) return null
+      const expectedFactCount = journeyIndexes
+        .reduce((count, journeyIndex) => count + journeys[journeyIndex]!.segments.length, 0)
+      if (item.segmentFacts.length !== expectedFactCount) return null
+      const factKeys = new Set<string>()
+      segmentFacts = []
+      for (const fact of item.segmentFacts) {
+        if (!isObj(fact) || !Number.isInteger(fact.journeyIndex) || !Number.isInteger(fact.segmentIndex)) return null
+        const journeyIndex = fact.journeyIndex as number
+        const segmentIndex = fact.segmentIndex as number
+        if (!journeyIndexSet.has(journeyIndex)) return null
+        if (segmentIndex < 0 || segmentIndex >= journeys[journeyIndex]!.segments.length) return null
+        const key = `${journeyIndex}:${segmentIndex}`
+        if (factKeys.has(key)) return null
+        factKeys.add(key)
+        if (fact.cabin !== undefined && (typeof fact.cabin !== 'string' || !fact.cabin.trim())) return null
+        if (fact.baggage !== undefined && (typeof fact.baggage !== 'string' || !fact.baggage.trim())) return null
+        const cabin = typeof fact.cabin === 'string' ? fact.cabin.trim() : ''
+        const baggage = typeof fact.baggage === 'string' ? fact.baggage.trim() : ''
+        segmentFacts.push({
+          journeyIndex,
+          segmentIndex,
+          ...(cabin ? { cabin } : {}),
+          ...(baggage ? { baggage } : {}),
+        })
+      }
+    }
     ticketGroupIds.add(ticketGroupId)
     ticketGroups.push({
       ticketGroupId,
       passengerGroupId,
-      journeyIndexes: journeyIndexes as number[],
+      journeyIndexes,
       fareSource: item.fareSource,
       ...(str(item.source) ? { source: str(item.source) } : {}),
       ...(str(item.cabin) ? { cabin: str(item.cabin) } : {}),
       ...(str(item.baggage) ? { baggage: str(item.baggage) } : {}),
+      ...(segmentFacts ? { segmentFacts } : {}),
       exactPassengerCount,
       verifiedAt,
       validity: { status: validityStatus, validUntil },

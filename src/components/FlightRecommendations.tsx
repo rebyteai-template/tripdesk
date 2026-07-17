@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 
 import type {
+  FareSource,
   FlightRecommendations,
   RecommendationJourney,
   RecommendationPlan,
   RecommendationStatus,
   SearchResult,
 } from '../frames.ts'
-import { cabinLabel, paxLabel } from '../booking.ts'
+import { paxLabel } from '../booking.ts'
 import { flightDateCn, flightMoney, flightRouteCell, journeyRoleLabel } from '../lib/flight-display.ts'
 import { FlightResultsTable } from './FlightResultsTable.tsx'
 
@@ -43,22 +44,14 @@ function roleLabel(journey: RecommendationJourney, index: number): string {
   return journeyRoleLabel(journey.role, index)
 }
 
-function fareSourceLabel(source: string): string {
-  if (source === 'roundtrip') return '往返票'
-  if (source === 'joint') return '联合 / 开口程票'
-  return '单程票'
+function fareSourceLabel(source: FareSource): string {
+  if (source === 'roundtrip') return '往返查询'
+  if (source === 'joint') return '联合查询'
+  return '单独查询'
 }
 
 function planTotal(plan: RecommendationPlan) {
   return plan.customerQuoteTotal ?? plan.verifiedFareTotal
-}
-
-function windowLabel(plan: RecommendationPlan): string {
-  return plan.windows
-    .slice()
-    .sort((left, right) => left.journeyIndex - right.journeyIndex)
-    .map((item) => `${roleLabel(plan.journeys[item.journeyIndex]!, item.journeyIndex)} ${item.window}`)
-    .join(' · ')
 }
 
 function CopyAction({ plan }: { plan: RecommendationPlan }) {
@@ -99,95 +92,210 @@ function CopyAction({ plan }: { plan: RecommendationPlan }) {
   )
 }
 
-function JourneyCard({ plan, journey, index }: { plan: RecommendationPlan; journey: RecommendationJourney; index: number }) {
-  const first = journey.segments[0]!
-  const last = journey.segments[journey.segments.length - 1]!
-  const route = journey.segments.map(flightRouteCell).join(' / ')
-  const flightNumbers = journey.segments.map((segment) => segment.flightNo).join(' → ')
-  const relevantTickets = plan.ticketGroups.filter((group) => group.journeyIndexes.includes(index))
+function segmentPassengerFacts(plan: RecommendationPlan, journeyIndex: number, segmentIndex: number) {
+  return plan.passengerGroups.map((passengers) => {
+    const ticket = plan.ticketGroups.find((group) =>
+      group.passengerGroupId === passengers.passengerGroupId && group.journeyIndexes.includes(journeyIndex))
+    const fact = ticket?.segmentFacts?.find((item) =>
+      item.journeyIndex === journeyIndex && item.segmentIndex === segmentIndex)
+    return {
+      id: passengers.passengerGroupId,
+      passengers: passengerSummary(passengers),
+      cabin: fact?.cabin ?? '未返回',
+      baggage: fact?.baggage ?? '未返回',
+    }
+  })
+}
+
+function SegmentFactLines({ plan, journeyIndex, segmentIndex, field }: {
+  plan: RecommendationPlan
+  journeyIndex: number
+  segmentIndex: number
+  field: 'cabin' | 'baggage'
+}) {
+  const rows = segmentPassengerFacts(plan, journeyIndex, segmentIndex)
   return (
-    <section className="recommend-journey" aria-labelledby={`${plan.planId}-${journey.journeyId}`}>
-      <div className="recommend-journey-head">
-        <h4 id={`${plan.planId}-${journey.journeyId}`}>
-          {roleLabel(journey, index)} · {journey.origin} → {journey.destination}
-          {journey.routePriority === 'alternate' ? <span className="recommend-route-priority">备选路线</span> : null}
-        </h4>
-        <span>{journey.transferCount ? `中转 ${journey.transferCount} 次` : '直飞'}</span>
-      </div>
-      <div className="recommend-flight-facts">
-        <strong className="mono">{flightNumbers}</strong>
-        <span>{flightDateCn(first.departureDate)} · {first.departureTime}–{last.arrivalTime}{last.arrivalDate > first.departureDate ? ' (+1)' : ''}</span>
-        <span>{route} · {journey.duration}</span>
-      </div>
-      <div className="recommend-cabin-lines" aria-label="乘客和舱位">
-        {relevantTickets.map((ticket) => {
-          const passengers = plan.passengerGroups.find((group) => group.passengerGroupId === ticket.passengerGroupId)!
-          return (
-            <div key={ticket.ticketGroupId}>
-              <span><strong>{passengerSummary(passengers)} · {ticket.cabin ?? cabinLabel(passengers.cabinClass)}</strong>{ticket.baggage ? ` · ${ticket.baggage}` : ''}</span>
-              <span className="muted">
-                {ticket.journeyIndexes.length === 1
-                  ? recommendationMoney(ticket.verifiedPrice.amount, ticket.verifiedPrice.currency)
-                  : '多程票总价见下方票组'}
-              </span>
-            </div>
-          )
-        })}
-      </div>
-    </section>
+    <div className="recommend-detail-lines">
+      {rows.map((row) => (
+        <div key={row.id}><strong>{row.passengers}</strong><span> · {row[field]}</span></div>
+      ))}
+    </div>
   )
 }
 
-function PlanCard({ plan, busy, onAction }: {
+function PlanSummary({ plan, busy, onAction }: {
   plan: RecommendationPlan
   busy: boolean
   onAction: (prompt: string) => void
 }) {
-  const total = planTotal(plan)
   return (
-    <article className="recommend-plan" aria-labelledby={`${plan.planId}-title`}>
-      <header className="recommend-plan-head">
-        <div>
-          <span className="recommend-kicker">{windowLabel(plan)}</span>
-          <h3 id={`${plan.planId}-title`}>{plan.label || '航班推荐方案'}</h3>
-          <span className="recommend-validity">{plan.validity.status === 'expired' ? '价格已过期' : '实时查询价'}</span>
-        </div>
-        <div className="recommend-plan-total">
-          <strong>{recommendationMoney(total.amount, total.currency)}</strong>
-          <span>{plan.customerQuoteTotal ? '客户报价总价' : '查询总价'}</span>
-        </div>
-        <div className="recommend-actions">
-          <CopyAction plan={plan} />
-          {plan.capabilities.canReverify ? (
-            <button type="button" disabled={busy} onClick={() => onAction(buildRecommendationRetryPrompt(plan.planId))}>重新验价</button>
-          ) : null}
-        </div>
-      </header>
-
-      <div className="recommend-journeys">
-        {plan.journeys.map((journey, index) => <JourneyCard key={journey.journeyId} plan={plan} journey={journey} index={index} />)}
+    <div className="recommend-plan-summary">
+      <strong className="recommend-plan-label">{plan.label || '未返回'}</strong>
+      <ul className="recommend-plan-journeys">
+        {plan.journeys.map((journey, journeyIndex) => (
+          <li key={journey.journeyId}>
+            <span>第{journeyIndex + 1}程</span>
+            <span className="mono">{plan.windows.find((item) => item.journeyIndex === journeyIndex)?.window ?? '未返回'}</span>
+          </li>
+        ))}
+      </ul>
+      {plan.validity.status === 'expired' ? (
+        <span className="recommend-validity">价格已过期</span>
+      ) : null}
+      <div className="recommend-actions">
+        <CopyAction plan={plan} />
+        {plan.capabilities.canReverify ? (
+          <button type="button" disabled={busy} onClick={() => onAction(buildRecommendationRetryPrompt(plan.planId))}>重新验价</button>
+        ) : null}
       </div>
+    </div>
+  )
+}
 
-      <section className="recommend-tickets" aria-label="票组明细">
-        <h4>票组</h4>
-        {plan.ticketGroups.map((ticket) => {
-          const passengers = plan.passengerGroups.find((group) => group.passengerGroupId === ticket.passengerGroupId)!
-          const journeys = ticket.journeyIndexes.map((journeyIndex) => roleLabel(plan.journeys[journeyIndex]!, journeyIndex)).join(' + ')
+function TicketPriceLines({ plan, tickets }: {
+  plan: RecommendationPlan
+  tickets: RecommendationPlan['ticketGroups']
+}) {
+  return (
+    <div className="recommend-ticket-lines recommend-price-lines">
+      {tickets.map((ticket) => {
+        const passengers = plan.passengerGroups.find((group) => group.passengerGroupId === ticket.passengerGroupId)!
+        return (
+          <div key={ticket.ticketGroupId}>
+            <span className={`recommend-source-badge is-${ticket.fareSource}`}>{fareSourceLabel(ticket.fareSource)}</span>
+            <strong>{passengerSummary(passengers)}</strong>
+            <strong className="recommend-fare-price mono">{recommendationMoney(ticket.verifiedPrice.amount, ticket.verifiedPrice.currency)}</strong>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function TicketSourceLines({ plan, tickets }: {
+  plan: RecommendationPlan
+  tickets: RecommendationPlan['ticketGroups']
+}) {
+  return (
+    <div className="recommend-ticket-lines recommend-channel-lines">
+      {tickets.map((ticket) => {
+        const passengers = plan.passengerGroups.find((group) => group.passengerGroupId === ticket.passengerGroupId)!
+        return (
+          <div key={ticket.ticketGroupId}>
+            <strong>{passengerSummary(passengers)}</strong>
+            <span> · {ticket.source || '未返回'}</span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function recommendationRows(plan: RecommendationPlan) {
+  return plan.journeys.flatMap((journey, journeyIndex) =>
+    journey.segments.map((segment, segmentIndex) => {
+      const tickets = segmentIndex === 0
+        ? plan.ticketGroups.filter((ticket) => Math.min(...ticket.journeyIndexes) === journeyIndex)
+        : []
+      const row = {
+        journey,
+        journeyIndex,
+        segment,
+        segmentIndex,
+        tickets,
+        isFirstPlanRow: journeyIndex === 0 && segmentIndex === 0,
+        isFirstJourneyRow: segmentIndex === 0,
+      }
+      return row
+    }),
+  )
+}
+
+function RecommendationTable({ plans, busy, onAction }: {
+  plans: RecommendationPlan[]
+  busy: boolean
+  onAction: (prompt: string) => void
+}) {
+  return (
+    <div className="table-scroll recommend-table-scroll">
+      <table className="recommend-table">
+        <thead>
+          <tr>
+            <th scope="col">方案</th>
+            <th scope="col">航程</th>
+            <th scope="col">航班号</th>
+            <th scope="col">日期</th>
+            <th scope="col">航段</th>
+            <th scope="col">时间</th>
+            <th scope="col">飞行时长</th>
+            <th scope="col">舱位</th>
+            <th scope="col">行李</th>
+            <th scope="col">价格</th>
+            <th scope="col">总价</th>
+            <th scope="col">供应渠道</th>
+          </tr>
+        </thead>
+        {plans.map((plan) => {
+          const rows = recommendationRows(plan)
+          const total = planTotal(plan)
           return (
-            <div key={ticket.ticketGroupId} className="recommend-ticket-row">
-              <span><strong>{passengerSummary(passengers)} · {fareSourceLabel(ticket.fareSource)}</strong> · 覆盖 {journeys}{ticket.source ? ` · ${ticket.source}` : ''}</span>
-              <strong>{recommendationMoney(ticket.verifiedPrice.amount, ticket.verifiedPrice.currency)}</strong>
-            </div>
+            <tbody key={plan.planId} className="recommend-plan-group">
+              {rows.map((row) => (
+              <tr
+                key={`${row.journey.journeyId}-${row.segmentIndex}`}
+                className={`recommend-segment-row ${row.isFirstJourneyRow ? 'is-journey-start' : ''}`.trim()}
+              >
+                {row.isFirstPlanRow ? (
+                  <th scope="rowgroup" rowSpan={rows.length} className="recommend-plan-cell">
+                    <PlanSummary plan={plan} busy={busy} onAction={onAction} />
+                  </th>
+                ) : null}
+                {row.isFirstJourneyRow ? (
+                  <th scope="rowgroup" rowSpan={row.journey.segments.length} className="recommend-journey-cell">
+                    <div className="recommend-journey-summary">
+                      <strong>{roleLabel(row.journey, row.journeyIndex)}</strong>
+                      <span> · {row.journey.transferCount ? `中转 ${row.journey.transferCount} 次` : '直飞'}</span>
+                    </div>
+                  </th>
+                ) : null}
+                <td className="recommend-flight-cell">
+                  <strong className="mono">{row.segment.flightNo}</strong>
+                </td>
+                <td className="recommend-date-cell">{flightDateCn(row.segment.departureDate)}</td>
+                <td className="recommend-route-cell">
+                  {flightRouteCell(row.segment)}
+                </td>
+                <td className="recommend-time-cell mono">
+                  {row.segment.departureTime}–{row.segment.arrivalTime}
+                  {row.segment.arrivalDate > row.segment.departureDate ? ' (+1)' : ''}
+                </td>
+                <td className="recommend-duration-cell mono">
+                  {row.segment.flightTime ?? '未返回'}
+                </td>
+                <td className="recommend-cabin-cell">
+                  <SegmentFactLines plan={plan} journeyIndex={row.journeyIndex} segmentIndex={row.segmentIndex} field="cabin" />
+                </td>
+                <td className="recommend-baggage-cell">
+                  <SegmentFactLines plan={plan} journeyIndex={row.journeyIndex} segmentIndex={row.segmentIndex} field="baggage" />
+                </td>
+                <td className="recommend-fare-cell">
+                  {row.tickets.length ? <TicketPriceLines plan={plan} tickets={row.tickets} /> : null}
+                </td>
+                {row.isFirstPlanRow ? (
+                  <td rowSpan={rows.length} className="recommend-total-cell">
+                    <strong className="mono">{recommendationMoney(total.amount, total.currency)}</strong>
+                  </td>
+                ) : null}
+                <td className="recommend-channel-cell">
+                  {row.tickets.length ? <TicketSourceLines plan={plan} tickets={row.tickets} /> : null}
+                </td>
+              </tr>
+              ))}
+            </tbody>
           )
         })}
-      </section>
-
-      {plan.explanation ? (
-        <p className="recommend-explanation">
-          {plan.explanation.reason}{plan.explanation.limitation ? ` 局限：${plan.explanation.limitation}` : ''}
-        </p>
-      ) : null}
-    </article>
+      </table>
+    </div>
   )
 }
 
@@ -232,9 +340,7 @@ export function FlightRecommendationsView({ result, evidence = [], busy, onActio
       ) : null}
 
       {result.plans.length ? (
-        <div className="recommend-plan-list">
-          {result.plans.map((plan) => <PlanCard key={plan.planId} plan={plan} busy={busy} onAction={onAction} />)}
-        </div>
+        <RecommendationTable plans={result.plans} busy={busy} onAction={onAction} />
       ) : null}
 
       {evidence.length ? (
